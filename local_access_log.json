@@ -131,5 +131,47 @@
     "user_agent": "Streamlit App",
     "timestamp": "2025-11-28T11:31:31.745722-03:00",
     "data_hora": "28/11/2025 11:31:31"
+  },
+  {
+    "usuario": "ALEXANDRE PEREIRA TOLENTINO",
+    "ip": "179.124.132.218",
+    "user_agent": "Streamlit App",
+    "timestamp": "2026-01-21T15:06:54.042486-03:00",
+    "data_hora": "21/01/2026 15:06:54"
+  },
+  {
+    "usuario": "ALEXANDRE PEREIRA TOLENTINO (LOGOUT)",
+    "ip": "179.124.132.218",
+    "user_agent": "Streamlit App",
+    "timestamp": "2026-01-21T15:07:05.074820-03:00",
+    "data_hora": "21/01/2026 15:07:05"
+  },
+  {
+    "usuario": "ALEXANDRE PEREIRA TOLENTINO",
+    "ip": "179.124.132.218",
+    "user_agent": "Streamlit App",
+    "timestamp": "2026-01-21T15:09:15.289261-03:00",
+    "data_hora": "21/01/2026 15:09:15"
+  },
+  {
+    "usuario": "ALEXANDRE PEREIRA TOLENTINO (LOGOUT)",
+    "ip": "179.124.132.218",
+    "user_agent": "Streamlit App",
+    "timestamp": "2026-01-21T15:09:22.710298-03:00",
+    "data_hora": "21/01/2026 15:09:22"
+  },
+  {
+    "usuario": "CENTRO DE ENSINO MEDIO ARY RIBEIRO VALADAO FILHO",
+    "ip": "179.124.132.218",
+    "user_agent": "Streamlit App",
+    "timestamp": "2026-01-21T15:09:33.662252-03:00",
+    "data_hora": "21/01/2026 15:09:33"
+  },
+  {
+    "usuario": "CENTRO DE ENSINO MEDIO ARY RIBEIRO VALADAO FILHO (LOGOUT)",
+    "ip": "179.124.132.218",
+    "user_agent": "Streamlit App",
+    "timestamp": "2026-01-21T15:09:42.166944-03:00",
+    "data_hora": "21/01/2026 15:09:42"
   }
 ]

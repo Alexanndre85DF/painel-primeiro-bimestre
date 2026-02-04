@@ -108,8 +108,10 @@ def autenticar_usuario(identificador, senha):
         
         # Comparar com CPF ou INEP
         if (cpf_usuario and cpf_usuario == id_limpo) or (inep_usuario and inep_usuario == id_limpo):
-            # Verificar senha (comparação direta)
-            if str(usuario.get('SENHA', '')) == str(senha):
+            # Verificar senha (normalizar removendo pontos e traços)
+            senha_usuario = re.sub(r'[^0-9]', '', str(usuario.get('SENHA', '')))
+            senha_limpa = re.sub(r'[^0-9]', '', str(senha))
+            if senha_usuario == senha_limpa:
                 # Registrar acesso apenas no momento do login
                 if MONITORING_AVAILABLE:
                     try:
@@ -156,7 +158,10 @@ def alterar_senha(identificador, senha_atual, nova_senha):
             
             # Comparar com CPF ou INEP
             if (cpf_usuario and cpf_usuario == id_limpo) or (inep_usuario and inep_usuario == id_limpo):
-                if str(usuario.get('SENHA', '')) == str(senha_atual):
+                # Verificar senha atual (normalizar removendo pontos e traços)
+                senha_usuario = re.sub(r'[^0-9]', '', str(usuario.get('SENHA', '')))
+                senha_atual_limpa = re.sub(r'[^0-9]', '', str(senha_atual))
+                if senha_usuario == senha_atual_limpa:
                     # Atualizar senha
                     df_usuarios.at[idx, 'SENHA'] = nova_senha
                     
