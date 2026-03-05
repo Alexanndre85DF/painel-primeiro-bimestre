@@ -551,6 +551,7 @@ def tela_login():
                     if usuario:
                         st.session_state.logado = True
                         st.session_state.usuario = usuario
+                        st.session_state.login_time = datetime.now()  # sessão expira em 30 minutos
                         st.success("Login realizado com sucesso!")
                         st.rerun()
                     else:
@@ -2132,6 +2133,17 @@ if not st.session_state.logado:
     tela_login()
     st.stop()
 
+# Sessão expira em 30 minutos: desloga e exige novo código por e-mail
+if st.session_state.logado:
+    if 'login_time' not in st.session_state:
+        st.session_state.login_time = datetime.now()
+    if (datetime.now() - st.session_state.login_time) > timedelta(minutes=30):
+        st.session_state.logado = False
+        st.session_state.usuario = None
+        if 'login_time' in st.session_state:
+            del st.session_state.login_time
+        st.rerun()
+
 # Verificar se deve mostrar tela de alterar senha
 if st.session_state.mostrar_alterar_senha:
     tela_alterar_senha()
@@ -2211,26 +2223,9 @@ with col_nav3:
         
         st.session_state.logado = False
         st.session_state.usuario = None
+        if 'login_time' in st.session_state:
+            del st.session_state.login_time
         st.rerun()
-
-# Botão Versão 3 bimestres centralizado abaixo dos outros botões
-st.markdown("""
-<style>
-.stButton > button[kind="primary"] {
-    background-color: #28a745 !important;
-    border-color: #28a745 !important;
-    color: white !important;
-}
-.stButton > button[kind="primary"]:hover {
-    background-color: #218838 !important;
-    border-color: #1e7e34 !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-col_center1, col_center2, col_center3 = st.columns([1, 1, 1])
-with col_center2:
-    st.link_button("📊 Versão 3 bimestres", "https://painel-sge-terceiro-bimestre-bwu2rnpej5yhdzelxanyrf.streamlit.app", use_container_width=True, type="primary")
 
 st.markdown("---")
 
