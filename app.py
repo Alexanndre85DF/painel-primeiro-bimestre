@@ -2182,7 +2182,7 @@ if st.session_state.mostrar_admin:
 # UI – Entrada de dados
 # -----------------------------
 # Header com boas-vindas personalizadas (será atualizado após seleção do tipo de análise)
-subtitulo_padrao = "Análise dos 1º e 2º Bimestres"
+subtitulo_padrao = "Análise do 1º Bimestre"
 st.markdown(f"""
 <div style="text-align: center; padding: 40px 20px; background: linear-gradient(135deg, #1e40af, #3b82f6); border-radius: 15px; margin-bottom: 30px; box-shadow: 0 8px 25px rgba(30, 64, 175, 0.3);">
     <h1 style="color: white; margin: 0; font-size: 2.2em; font-weight: 700; text-shadow: 0 2px 4px rgba(0,0,0,0.3);">Superintendência Regional de Educação de Gurupi TO</h1>
