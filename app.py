@@ -999,6 +999,31 @@ def processar_conteudo_aplicado(df):
 
 def processar_notas_frequencia(df):
     """Processa planilha de notas/frequência (processamento atual)"""
+    # Algumas planilhas (principalmente quando salvas/abertas em diferentes ambientes)
+    # podem vir com caracteres "quebrados" nos nomes de colunas (ex.: "Frequ�ncia").
+    # Vamos normalizar pelo conteúdo do nome, não por igualdade exata.
+    ren = {}
+    for col in df.columns:
+        col_str = str(col).strip()
+        col_low = col_str.lower()
+        # Periodo
+        if col_low in ("período", "periodo"):
+            ren[col] = "Periodo"
+            continue
+        # Frequência / Frequencia
+        if "frequ" in col_low and "anual" not in col_low:
+            ren[col] = "Frequencia"
+            continue
+        if "frequ" in col_low and "anual" in col_low:
+            ren[col] = "Frequencia Anual"
+            continue
+        # Nº Chamada
+        if ("chamada" in col_low) and (col_low.startswith("n") or "n" in col_low):
+            ren[col] = "N Chamada"
+            continue
+    if ren:
+        df = df.rename(columns=ren)
+
     # Garantir colunas esperadas (flexível aos nomes encontrados)
     # Esperados: Escola, Turma, Turno, Aluno, Periodo, Disciplina, Nota, Falta, Frequência, Frequência Anual
     # Algumas planilhas têm "Período" com acento; vamos padronizar para "Periodo"
@@ -2290,11 +2315,20 @@ try:
         st.markdown("---")
         col_sel1, col_sel2 = st.columns([1, 2])
         with col_sel1:
+            # Se a planilha só tem 1º bimestre, já selecionar automaticamente
+            default_index = 0
+            if "Periodo" in df.columns:
+                p = df["Periodo"].astype(str).str.lower()
+                tem_primeiro = p.str.contains("primeiro|1º|1o", regex=True, na=False).any()
+                tem_segundo = p.str.contains("segundo|2º|2o", regex=True, na=False).any()
+                if tem_primeiro and not tem_segundo:
+                    default_index = 1
             tipo_analise = st.radio(
                 "Tipo de Análise:",
                 ["1º e 2º Bimestres", "Apenas 1º Bimestre"],
                 help="Escolha se deseja analisar os dois primeiros bimestres ou apenas o primeiro bimestre",
-                horizontal=True
+                horizontal=True,
+                index=default_index
             )
         with col_sel2:
             if tipo_analise == "Apenas 1º Bimestre":
@@ -3241,13 +3275,21 @@ if len(incompletos) > 0:
                 incompletos_ordenados[c] = incompletos_ordenados[c].round(1)
                 incompletos_ordenados[c] = incompletos_ordenados[c].apply(lambda x: f"{x:.1f}".rstrip('0').rstrip('.') if pd.notna(x) else x)
         
-        # Adicionar coluna indicando qual bimestre falta
-        incompletos_ordenados["Falta"] = incompletos_ordenados.apply(
-            lambda row: "1º Bimestre" if pd.isna(row["N1"]) else "2º Bimestre", axis=1
+        # Adicionar coluna indicando qual bimestre falta (modo 1º bimestre não deve depender de N2)
+        if tipo_analise == "Apenas 1º Bimestre" or "N2" not in incompletos_ordenados.columns:
+            incompletos_ordenados["Falta"] = "1º Bimestre"
+            cols_incompletos_geral = [coluna_aluno, "Turma", "Disciplina", "N1", "Falta", "Classificacao"]
+        else:
+            incompletos_ordenados["Falta"] = incompletos_ordenados.apply(
+                lambda row: "1º Bimestre" if pd.isna(row["N1"]) else "2º Bimestre", axis=1
+            )
+            cols_incompletos_geral = [coluna_aluno, "Turma", "Disciplina", "N1", "N2", "Falta", "Classificacao"]
+
+        # Filtrar apenas colunas que existem para evitar KeyError
+        cols_incompletos_geral = [c for c in cols_incompletos_geral if c in incompletos_ordenados.columns]
+        styled_incompletos_geral = incompletos_ordenados[cols_incompletos_geral].style.applymap(
+            color_classification, subset=["Classificacao"] if "Classificacao" in incompletos_ordenados.columns else None
         )
-        
-        cols_incompletos_geral = [coluna_aluno, "Turma", "Disciplina", "N1", "N2", "Falta", "Classificacao"]
-        styled_incompletos_geral = incompletos_ordenados[cols_incompletos_geral].style.applymap(color_classification, subset=["Classificacao"])
         st.dataframe(styled_incompletos_geral, use_container_width=True)
         
         # Botão de exportação geral
