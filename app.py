@@ -3159,7 +3159,11 @@ if len(incompletos) > 0:
     incompletos_b1 = incompletos[pd.isna(incompletos["N1"])].copy()
     
     # Incompletos do 2º bimestre: falta N2
-    incompletos_b2 = incompletos[pd.isna(incompletos["N2"])].copy()
+    # Algumas planilhas/versões (ex.: apenas 1º bimestre) não possuem a coluna N2
+    if "N2" in incompletos.columns:
+        incompletos_b2 = incompletos[pd.isna(incompletos["N2"])].copy()
+    else:
+        incompletos_b2 = incompletos.iloc[0:0].copy()
     
     # Criar abas para cada bimestre
     # Criar abas para cada bimestre
