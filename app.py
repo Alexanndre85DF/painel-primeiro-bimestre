@@ -2311,50 +2311,28 @@ try:
         st.stop()
     else:
         # Continuar com interface padrão de notas/frequência
-        # Seletor de tipo de análise
+        # Tipo de análise (travado): apenas 1º bimestre
         st.markdown("---")
-        col_sel1, col_sel2 = st.columns([1, 2])
-        with col_sel1:
-            # Se a planilha só tem 1º bimestre, já selecionar automaticamente
-            default_index = 0
-            if "Periodo" in df.columns:
-                p = df["Periodo"].astype(str).str.lower()
-                tem_primeiro = p.str.contains("primeiro|1º|1o", regex=True, na=False).any()
-                tem_segundo = p.str.contains("segundo|2º|2o", regex=True, na=False).any()
-                if tem_primeiro and not tem_segundo:
-                    default_index = 1
-            tipo_analise = st.radio(
-                "Tipo de Análise:",
-                ["1º e 2º Bimestres", "Apenas 1º Bimestre"],
-                help="Escolha se deseja analisar os dois primeiros bimestres ou apenas o primeiro bimestre",
-                horizontal=True,
-                index=default_index
-            )
-        with col_sel2:
-            if tipo_analise == "Apenas 1º Bimestre":
-                st.info("📊 Análise focada apenas no primeiro bimestre. Os dados serão filtrados automaticamente.")
-            else:
-                st.info("📊 Análise dos dois primeiros bimestres (padrão).")
+        tipo_analise = "Apenas 1º Bimestre"
+        st.info("📊 Análise focada apenas no primeiro bimestre. Os dados serão filtrados automaticamente.")
         
-        # Filtrar dados se necessário
-        if tipo_analise == "Apenas 1º Bimestre":
-            # Filtrar apenas primeiro bimestre
-            def is_bimestre_1(periodo):
-                """Verifica se o período é primeiro bimestre"""
-                if not isinstance(periodo, str):
-                    return False
-                p = periodo.lower()
-                return ("primeiro" in p or "1º" in p or "1o" in p)
-            
-            if "Periodo" in df.columns:
-                df = df[df["Periodo"].apply(is_bimestre_1)].copy()
-            
-            # Atualizar subtítulo do header
-            st.markdown("""
-            <script>
-                document.getElementById('subtitulo-analise').textContent = 'Análise do 1º Bimestre';
-            </script>
-            """, unsafe_allow_html=True)
+        # Filtrar apenas primeiro bimestre (sempre)
+        def is_bimestre_1(periodo):
+            """Verifica se o período é primeiro bimestre"""
+            if not isinstance(periodo, str):
+                return False
+            p = periodo.lower()
+            return ("primeiro" in p or "1º" in p or "1o" in p)
+        
+        if "Periodo" in df.columns:
+            df = df[df["Periodo"].apply(is_bimestre_1)].copy()
+        
+        # Atualizar subtítulo do header
+        st.markdown("""
+        <script>
+            document.getElementById('subtitulo-analise').textContent = 'Análise do 1º Bimestre';
+        </script>
+        """, unsafe_allow_html=True)
         
         # Armazenar tipo de análise no dataframe para uso posterior
         df.attrs['tipo_analise'] = tipo_analise
@@ -2716,7 +2694,7 @@ if "Frequencia Anual" in df_filt.columns or "Frequencia" in df_filt.columns:
 if hasattr(df, 'attrs') and 'tipo_analise' in df.attrs:
     tipo_analise = df.attrs['tipo_analise']
 else:
-    tipo_analise = '1º e 2º Bimestres'
+    tipo_analise = "Apenas 1º Bimestre"
 
 # Usar função apropriada baseada no tipo de análise
 if tipo_analise == "Apenas 1º Bimestre":
@@ -3401,15 +3379,20 @@ if len(incompletos) > 0:
                 # Ordenar e formatar dados do 2º bimestre
                 incompletos_b2_ordenados = incompletos_b2.sort_values(["Turma", coluna_aluno, "Disciplina"])
                 
-            # Formatar colunas numéricas (sempre usa N1, N2, Media12, ReqMediaProx2 para 2º bimestre)
-            for c in ["N1", "N2", "Media12", "ReqMediaProx2"]:
-                if c in incompletos_b2_ordenados.columns:
+                # Formatar colunas numéricas
+                for c in ["N1", "N2", "Media12", "ReqMediaProx2"]:
+                    if c in incompletos_b2_ordenados.columns:
                         incompletos_b2_ordenados[c] = incompletos_b2_ordenados[c].round(1)
-                        incompletos_b2_ordenados[c] = incompletos_b2_ordenados[c].apply(lambda x: f"{x:.1f}".rstrip('0').rstrip('.') if pd.notna(x) else x)
+                        incompletos_b2_ordenados[c] = incompletos_b2_ordenados[c].apply(
+                            lambda x: f"{x:.1f}".rstrip('0').rstrip('.') if pd.notna(x) else x
+                        )
                 
-                # Mostrar tabela do 2º bimestre
+                # Mostrar tabela do 2º bimestre (somente colunas existentes)
                 cols_incompletos_b2 = [coluna_aluno, "Turma", "Disciplina", "N1", "N2", "Media12", "Classificacao"]
-                styled_incompletos_b2 = incompletos_b2_ordenados[cols_incompletos_b2].style.applymap(color_classification, subset=["Classificacao"])
+                cols_incompletos_b2 = [c for c in cols_incompletos_b2 if c in incompletos_b2_ordenados.columns]
+                styled_incompletos_b2 = incompletos_b2_ordenados[cols_incompletos_b2].style.applymap(
+                    color_classification, subset=["Classificacao"]
+                )
                 st.dataframe(styled_incompletos_b2, use_container_width=True)
                 
                 # Botão de exportação do 2º bimestre
@@ -3458,7 +3441,11 @@ if len(incompletos) > 0:
 # Criar seção por bimestres
 st.markdown("### 📋 Resumo por Bimestre")
 
-col_bim1, col_bim2 = st.columns(2)
+if tipo_analise == "Apenas 1º Bimestre":
+    col_bim1, = st.columns(1)
+    col_bim2 = None
+else:
+    col_bim1, col_bim2 = st.columns(2)
 
 with col_bim1:
     st.markdown("#### 1º Bimestre")
