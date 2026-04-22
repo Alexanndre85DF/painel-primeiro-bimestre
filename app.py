@@ -2631,11 +2631,26 @@ if "Frequencia Anual" in df_filt.columns or "Frequencia" in df_filt.columns:
             st.error("Não foi possível encontrar uma coluna de aluno/estudante. Colunas disponíveis: " + ", ".join(df_filt.columns))
             st.stop()
     
-    if "Frequencia Anual" in df_filt.columns:
-        freq_geral = df_filt.groupby(coluna_aluno)["Frequencia Anual"].last().reset_index()
-        freq_geral = freq_geral.rename(columns={"Frequencia Anual": "Frequencia"})
+    # Consolidar frequência por aluno.
+    # Motivo: um aluno pode aparecer em múltiplas turmas/linhas; queremos uma regra consistente
+    # para os indicadores. Aqui usamos a PIOR (mínima) frequência do aluno (mais informativo
+    # para risco), baseada no último valor por Turma quando disponível.
+    col_freq_raw = "Frequencia Anual" if "Frequencia Anual" in df_filt.columns else "Frequencia"
+    if "Turma" in df_filt.columns:
+        freq_por_turma = (
+            df_filt.groupby([coluna_aluno, "Turma"])[col_freq_raw]
+            .last()
+            .reset_index()
+        )
+        freq_geral = (
+            freq_por_turma.groupby(coluna_aluno)[col_freq_raw]
+            .min()
+            .reset_index()
+        )
     else:
-        freq_geral = df_filt.groupby(coluna_aluno)["Frequencia"].last().reset_index()
+        freq_geral = df_filt.groupby(coluna_aluno)[col_freq_raw].min().reset_index()
+
+    freq_geral = freq_geral.rename(columns={col_freq_raw: "Frequencia"})
     
     freq_geral["Classificacao_Freq"] = freq_geral["Frequencia"].apply(classificar_frequencia_geral)
     contagem_freq_geral = freq_geral["Classificacao_Freq"].value_counts()
@@ -2901,10 +2916,22 @@ with col_res3:
 with col_res4:
     # Calcular alunos com frequência baixa se disponível
     if "Frequencia Anual" in df_filt.columns or "Frequencia" in df_filt.columns:
-        if "Frequencia Anual" in df_filt.columns:
-            freq_baixa_count = len(df_filt[df_filt["Frequencia Anual"] < 95][coluna_aluno].unique())
+        col_freq_raw = "Frequencia Anual" if "Frequencia Anual" in df_filt.columns else "Frequencia"
+        if "Turma" in df_filt.columns:
+            freq_por_turma = (
+                df_filt.groupby([coluna_aluno, "Turma"])[col_freq_raw]
+                .last()
+                .reset_index()
+            )
+            freq_por_aluno = (
+                freq_por_turma.groupby(coluna_aluno)[col_freq_raw]
+                .min()
+                .reset_index()
+            )
         else:
-            freq_baixa_count = len(df_filt[df_filt["Frequencia"] < 95][coluna_aluno].unique())
+            freq_por_aluno = df_filt.groupby(coluna_aluno)[col_freq_raw].min().reset_index()
+
+        freq_baixa_count = int((freq_por_aluno[col_freq_raw] < 95).sum())
         
         st.markdown(f"""
         <div style="background: linear-gradient(135deg, #eff6ff, #dbeafe); border-radius: 10px; padding: 18px; margin: 5px 0; box-shadow: 0 2px 8px rgba(59, 130, 246, 0.15); border-left: 4px solid #3b82f6;">
