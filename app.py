@@ -3808,18 +3808,29 @@ col_graf1, col_graf2 = st.columns(2)
 with col_graf2:
     with st.expander("Distribuição de Frequência por Faixas"):
         if "Frequencia Anual" in df_filt.columns or "Frequencia" in df_filt.columns:
-            # Usar os mesmos dados do Resumo de Frequência
-            if "Frequencia Anual" in df_filt.columns:
-                freq_geral = df_filt.groupby([coluna_aluno, "Turma"])["Frequencia Anual"].last().reset_index()
-                freq_geral = freq_geral.rename(columns={"Frequencia Anual": "Frequencia"})
+            # Usar a MESMA base do "Resumo de Frequência": consolidar 1 registro por aluno.
+            # Isso evita inflar o total quando um aluno aparece em mais de uma Turma.
+            col_freq_raw = "Frequencia Anual" if "Frequencia Anual" in df_filt.columns else "Frequencia"
+
+            if "Turma" in df_filt.columns:
+                freq_por_turma = (
+                    df_filt.groupby([coluna_aluno, "Turma"])[col_freq_raw]
+                    .last()
+                    .reset_index()
+                )
+                freq_geral = (
+                    freq_por_turma.groupby(coluna_aluno)[col_freq_raw]
+                    .min()
+                    .reset_index()
+                )
             else:
-                freq_geral = df_filt.groupby([coluna_aluno, "Turma"])["Frequencia"].last().reset_index()
-            
+                freq_geral = df_filt.groupby(coluna_aluno)[col_freq_raw].min().reset_index()
+
+            freq_geral = freq_geral.rename(columns={col_freq_raw: "Frequencia"})
             freq_geral["Classificacao_Freq"] = freq_geral["Frequencia"].apply(classificar_frequencia_geral)
             contagem_freq_geral = freq_geral["Classificacao_Freq"].value_counts()
             
             # Preparar dados para o gráfico
-            dados_grafico = []
             cores = {
                 "Reprovado": "#dc2626",
                 "Alto Risco": "#ea580c", 
@@ -3828,24 +3839,39 @@ with col_graf2:
                 "Meta Favorável": "#16a34a"
             }
             
-            for categoria, quantidade in contagem_freq_geral.items():
-                if categoria != "Sem dados":  # Excluir "Sem dados" do gráfico
-                    dados_grafico.append({
-                        "Categoria": categoria,
-                        "Quantidade": quantidade,
-                        "Cor": cores.get(categoria, "#6b7280")
-                    })
+            # Mostrar todas as faixas, mesmo as que tiverem 0 (para bater com a "visão geral")
+            categorias_ordem = ["Reprovado", "Alto Risco", "Risco Moderado", "Ponto de Atenção", "Meta Favorável"]
+            total_alunos = int(contagem_freq_geral.sum())
+            dados_grafico = []
+            for categoria in categorias_ordem:
+                quantidade = int(contagem_freq_geral.get(categoria, 0))
+                percentual = (quantidade / total_alunos * 100) if total_alunos > 0 else 0
+                dados_grafico.append({
+                    "Categoria": categoria,
+                    "Quantidade": quantidade,
+                    "Percentual": percentual,
+                    "Rotulo": f"{percentual:.1f}% ({quantidade})",
+                    "Cor": cores.get(categoria, "#6b7280"),
+                })
             
             if dados_grafico:
                 df_grafico = pd.DataFrame(dados_grafico)
                 
                 # Criar gráfico de barras
-                fig_freq = px.bar(df_grafico, x="Categoria", y="Quantidade", 
+                fig_freq = px.bar(
+                                 df_grafico,
+                                 x="Categoria",
+                                 y="Percentual",
                                  title="Distribuição de Alunos por Faixa de Frequência",
                                  color="Categoria", 
-                                 color_discrete_map=cores)
+                                 color_discrete_map=cores,
+                                 text="Rotulo",
+                                 hover_data={"Quantidade": True, "Percentual": ":.1f"}
+                )
                 fig_freq.update_layout(xaxis_title=None, yaxis_title="Número de Alunos", 
                                      bargap=0.25, showlegend=False, xaxis_tickangle=45)
+                fig_freq.update_traces(textposition="outside", cliponaxis=False)
+                fig_freq.update_yaxes(title_text="Percentual de Alunos (%)", rangemode="tozero")
                 st.plotly_chart(fig_freq, use_container_width=True)
                 
                 # Botão de exportação para dados do gráfico de frequência
@@ -3866,17 +3892,24 @@ with col_graf2:
                 
                 # Estatísticas adicionais
                 st.markdown("**Resumo das Faixas de Frequência:**")
-                col_stat1, col_stat2, col_stat3 = st.columns(3)
+                col_stat1, col_stat2, col_stat3, col_stat4, col_stat5, col_stat6 = st.columns(6)
                 with col_stat1:
-                    total_alunos = contagem_freq_geral.sum()
-                    st.metric("Total de Alunos", total_alunos, help="Total de alunos considerados na análise de frequência")
+                    st.metric("Total", total_alunos, help="Total de alunos considerados na análise de frequência (após filtros)")
                 with col_stat2:
-                    alunos_risco = contagem_freq_geral.get("Reprovado", 0) + contagem_freq_geral.get("Alto Risco", 0)
-                    st.metric("Alunos em Risco", alunos_risco, help="Alunos reprovados ou em alto risco de reprovação por frequência")
+                    qtd = int(contagem_freq_geral.get("Reprovado", 0))
+                    st.metric("<75%", f"{(qtd/total_alunos*100 if total_alunos else 0):.1f}%", help=f"Reprovado por frequência: {qtd} alunos")
                 with col_stat3:
-                    alunos_meta = contagem_freq_geral.get("Meta Favorável", 0)
-                    percentual_meta = (alunos_meta / total_alunos * 100) if total_alunos > 0 else 0
-                    st.metric("Meta Favorável", f"{percentual_meta:.1f}%", help="Percentual de alunos com frequência ≥ 95% (meta favorável)")
+                    qtd = int(contagem_freq_geral.get("Alto Risco", 0))
+                    st.metric("<80%", f"{(qtd/total_alunos*100 if total_alunos else 0):.1f}%", help=f"Alto risco: {qtd} alunos")
+                with col_stat4:
+                    qtd = int(contagem_freq_geral.get("Risco Moderado", 0))
+                    st.metric("<90%", f"{(qtd/total_alunos*100 if total_alunos else 0):.1f}%", help=f"Risco moderado: {qtd} alunos")
+                with col_stat5:
+                    qtd = int(contagem_freq_geral.get("Ponto de Atenção", 0))
+                    st.metric("<95%", f"{(qtd/total_alunos*100 if total_alunos else 0):.1f}%", help=f"Ponto de atenção: {qtd} alunos")
+                with col_stat6:
+                    qtd = int(contagem_freq_geral.get("Meta Favorável", 0))
+                    st.metric("≥95%", f"{(qtd/total_alunos*100 if total_alunos else 0):.1f}%", help=f"Meta favorável: {qtd} alunos")
             else:
                 st.info("Sem dados de frequência para exibir.")
         else:
