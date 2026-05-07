@@ -8,6 +8,7 @@ from openpyxl.styles import PatternFill, Font, Alignment
 from openpyxl.utils.dataframe import dataframe_to_rows
 import hashlib
 import re
+import unicodedata
 from datetime import datetime, timedelta
 import os
 import random
@@ -898,6 +899,38 @@ SOMA_FINAL_ALVO = MEDIA_FINAL_ALVO * 4  # 24 pontos no ano
 # -----------------------------
 # Utilidades
 # -----------------------------
+def _normalizar_chave_texto(valor):
+    """
+    Normaliza texto para comparação (casefold + sem acentos + espaços colapsados).
+    Usado para unificar nomes que variam entre escolas/etapas.
+    """
+    if valor is None:
+        return ""
+    s = str(valor).strip()
+    s = re.sub(r"\s+", " ", s)
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    return s.casefold()
+
+
+# Aliases de disciplinas (chave já normalizada por _normalizar_chave_texto)
+DISCIPLINA_ALIASES = {
+    "arte": "Arte",
+    "artes": "Arte",
+}
+
+
+def unificar_nomes_disciplina(df, coluna="Disciplina"):
+    """Unifica variações de nomes de disciplina (ex.: Arte/Artes)."""
+    if coluna not in df.columns:
+        return df
+
+    s = df[coluna].astype(str).str.strip()
+    s = s.str.replace(r"\s+", " ", regex=True)
+    chaves = s.map(_normalizar_chave_texto)
+    df[coluna] = chaves.map(DISCIPLINA_ALIASES).fillna(s)
+    return df
+
 def detectar_tipo_planilha(df):
     """
     Detecta automaticamente o tipo de planilha baseado nas colunas disponíveis
@@ -998,6 +1031,9 @@ def processar_conteudo_aplicado(df):
     for col in ['Disciplina', 'Atividade', 'Status']:
         if col in df.columns:
             df[col] = df[col].astype(str).str.strip()
+
+    # Unificar possíveis variações de disciplina (ex.: Arte/Artes)
+    df = unificar_nomes_disciplina(df, "Disciplina")
     
     # Adicionar tipo de planilha para identificação
     df.attrs['tipo_planilha'] = 'conteudo_aplicado'
@@ -1082,6 +1118,9 @@ def processar_notas_frequencia(df):
     for col in ["Escola", "Turma", "Turno", "Status", "Periodo", "Disciplina"]:
         if col in df.columns:
             df[col] = df[col].astype(str).str.strip()
+
+    # Unificar possíveis variações de disciplina (ex.: Arte/Artes)
+    df = unificar_nomes_disciplina(df, "Disciplina")
     
     # Detectar coluna de aluno/estudante
     coluna_aluno = None
