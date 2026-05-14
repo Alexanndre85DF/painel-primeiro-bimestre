@@ -896,6 +896,117 @@ MEDIA_APROVACAO = 6.0
 MEDIA_FINAL_ALVO = 6.0   # média final desejada após 4 bimestres
 SOMA_FINAL_ALVO = MEDIA_FINAL_ALVO * 4  # 24 pontos no ano
 
+
+def medias_notas_por_turma_ordenadas(df_src, periodo_keywords, cores_alternadas=("#1e40af", "#059669")):
+    """
+    Média de Nota por turma (filtro por substring em Periodo). Ordem: melhor média → pior.
+    Com mais de uma escola nos dados, agrega por (Escola, Turma) e rotula 'Escola — Turma'.
+    """
+    if (
+        df_src is None
+        or df_src.empty
+        or "Turma" not in df_src.columns
+        or "Nota" not in df_src.columns
+        or "Periodo" not in df_src.columns
+    ):
+        return pd.DataFrame()
+    mask = False
+    for kw in periodo_keywords:
+        mask = mask | df_src["Periodo"].str.contains(kw, case=False, na=False)
+    d = df_src[mask & df_src["Nota"].notna()].copy()
+    if d.empty:
+        return pd.DataFrame()
+    multi_escola = "Escola" in d.columns and d["Escola"].nunique(dropna=True) > 1
+    if multi_escola:
+        g = d.groupby(["Escola", "Turma"], as_index=False).agg(
+            Media_Notas=("Nota", "mean"),
+            N_Lancamentos=("Nota", "count"),
+        )
+        g["Turma_Label"] = g["Escola"].astype(str) + " — " + g["Turma"].astype(str)
+    else:
+        g = d.groupby("Turma", as_index=False).agg(
+            Media_Notas=("Nota", "mean"),
+            N_Lancamentos=("Nota", "count"),
+        )
+        g["Turma_Label"] = g["Turma"].astype(str)
+    g = g.sort_values("Media_Notas", ascending=False).reset_index(drop=True)
+    c1, c2 = cores_alternadas
+    g["Cor"] = [c1 if i % 2 == 0 else c2 for i in range(len(g))]
+    return g
+
+
+def top_destaques_por_media_notas(df_src, col_aluno, periodo_keywords, top_n=10):
+    """
+    Top N alunos pela média aritmética das notas nos períodos indicados (substring em Periodo).
+    """
+    if (
+        df_src is None
+        or df_src.empty
+        or not col_aluno
+        or col_aluno not in df_src.columns
+        or "Nota" not in df_src.columns
+        or "Periodo" not in df_src.columns
+    ):
+        return pd.DataFrame()
+
+    def _moda_ou_primeiro(series):
+        m = series.dropna().astype(str).str.strip()
+        m = m[m != ""]
+        if m.empty:
+            return ""
+        mode = m.mode()
+        if len(mode) > 0:
+            return str(mode.iloc[0])
+        return str(m.iloc[0])
+
+    mask = False
+    for kw in periodo_keywords:
+        mask = mask | df_src["Periodo"].str.contains(kw, case=False, na=False)
+    d = df_src[mask & df_src["Nota"].notna()].copy()
+    if d.empty:
+        return pd.DataFrame()
+
+    if "Disciplina" in d.columns:
+        g = d.groupby(col_aluno, as_index=False).agg(
+            _media=("Nota", "mean"),
+            _qtd=("Nota", "count"),
+            _disc=("Disciplina", "nunique"),
+        )
+        g = g.rename(columns={"_media": "Média", "_qtd": "Qtd_notas", "_disc": "Disciplinas"})
+    else:
+        g = d.groupby(col_aluno, as_index=False).agg(
+            _media=("Nota", "mean"),
+            _qtd=("Nota", "count"),
+        )
+        g = g.rename(columns={"_media": "Média", "_qtd": "Qtd_notas"})
+
+    if "Turma" in d.columns:
+        tur_rep = d.groupby(col_aluno)["Turma"].agg(_moda_ou_primeiro).reset_index()
+        tur_rep.columns = [col_aluno, "Turma"]
+        g = g.merge(tur_rep, on=col_aluno, how="left")
+
+    if "Escola" in d.columns and d["Escola"].nunique(dropna=True) > 1:
+        esc_rep = d.groupby(col_aluno)["Escola"].agg(_moda_ou_primeiro).reset_index()
+        esc_rep.columns = [col_aluno, "Escola"]
+        g = g.merge(esc_rep, on=col_aluno, how="left")
+
+    g = g.sort_values(["Média", col_aluno], ascending=[False, True]).head(top_n).reset_index(drop=True)
+    g.insert(0, "Posição", np.arange(1, len(g) + 1))
+    g = g.rename(columns={col_aluno: "Aluno", "Qtd_notas": "Qtd. notas"})
+    g["Média"] = g["Média"].round(2)
+    if "Disciplinas" in g.columns:
+        g["Disciplinas"] = g["Disciplinas"].astype("Int64")
+
+    cols = ["Posição", "Aluno", "Média", "Qtd. notas"]
+    if "Disciplinas" in g.columns:
+        cols.append("Disciplinas")
+    if "Turma" in g.columns:
+        cols.append("Turma")
+    if "Escola" in g.columns:
+        cols.append("Escola")
+    return g[[c for c in cols if c in g.columns]]
+
+
 # -----------------------------
 # Utilidades
 # -----------------------------
@@ -2854,52 +2965,6 @@ if tipo_analise != "Apenas 1º Bimestre":
         # Adicionar tooltip
         st.metric("", "", help="Número de alunos únicos que tiveram pelo menos uma nota abaixo de 6 no 2º bimestre.")
 
-# KPIs - Alertas Críticos (com destaque visual)
-st.markdown("""
-<div style="background: linear-gradient(135deg, #1e40af, #3b82f6); border-radius: 12px; padding: 25px; margin: 20px 0; box-shadow: 0 4px 15px rgba(30, 64, 175, 0.2);">
-    <h2 style="color: white; text-align: center; margin: 0; font-size: 1.7em; font-weight: 700; text-shadow: 0 1px 3px rgba(0,0,0,0.3);">Alertas Críticos</h2>
-    <p style="color: rgba(255,255,255,0.9); text-align: center; margin: 8px 0 0 0; font-size: 1.1em; font-weight: 500;">Situações que precisam de atenção imediata</p>
-</div>
-""", unsafe_allow_html=True)
-
-col5, col6 = st.columns(2)
-
-# Métricas de alerta com destaque visual (excluindo incompletos)
-alerta_count = int(indic[indic["Alerta"] & (indic["Classificacao"] != "Incompleto")].sum()["Alerta"])
-corda_bamba_count = int(indic["CordaBamba"].sum())
-
-# Calcular alunos únicos em alerta e corda bamba (excluindo incompletos)
-alunos_unicos_alerta = indic[indic["Alerta"] & (indic["Classificacao"] != "Incompleto")][coluna_aluno].nunique()
-alunos_unicos_corda_bamba = indic[indic["CordaBamba"]][coluna_aluno].nunique()
-
-with col5:
-    st.markdown("""
-    <div style="background: linear-gradient(135deg, #dbeafe, #bfdbfe); border-radius: 10px; padding: 18px; margin: 5px 0; box-shadow: 0 2px 8px rgba(59, 130, 246, 0.15); border-left: 4px solid #3b82f6;">
-        <h3 style="color: #1e40af; margin: 0 0 15px 0; font-size: 1.1em; font-weight: 600;">Alunos-Disciplinas em ALERTA</h3>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <div style="font-size: 2.5em; font-weight: 700; color: #1e40af;">{}</div>
-            <div style="font-size: 2.5em; font-weight: 700; color: #64748b;">{} alunos</div>
-        </div>
-    </div>
-    """.format(alerta_count, alunos_unicos_alerta), unsafe_allow_html=True)
-    
-    # Adicionar tooltip funcional
-    st.metric("", "", help="Alunos-disciplinas em situação de risco (Vermelho Duplo, Queda p/ Vermelho ou Corda Bamba). O número entre parênteses mostra quantos alunos únicos estão em alerta.")
-
-with col6:
-    st.markdown("""
-    <div style="background: linear-gradient(135deg, #e0f2fe, #b3e5fc); border-radius: 10px; padding: 18px; margin: 5px 0; box-shadow: 0 2px 8px rgba(14, 165, 233, 0.15); border-left: 4px solid #0ea5e9;">
-        <h3 style="color: #0c4a6e; margin: 0 0 15px 0; font-size: 1.1em; font-weight: 600;">Corda Bamba</h3>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <div style="font-size: 2.5em; font-weight: 700; color: #0c4a6e;">{}</div>
-            <div style="font-size: 2.5em; font-weight: 700; color: #64748b;">{} alunos</div>
-        </div>
-    </div>
-    """.format(corda_bamba_count, alunos_unicos_corda_bamba), unsafe_allow_html=True)
-    
-    # Adicionar tooltip funcional
-    st.metric("", "", help="Corda Bamba são alunos que precisam tirar 7 ou mais nos próximos bimestres para recuperar e sair do limite da média mínima. O número maior mostra em quantas disciplinas eles aparecem; o número entre parênteses mostra quantos alunos diferentes estão nessa condição.")
-
 # Resumo Executivo - Dashboard Principal
 st.markdown("""
 <div style="background: linear-gradient(135deg, #1e40af, #3b82f6); border-radius: 12px; padding: 25px; margin: 20px 0; box-shadow: 0 4px 15px rgba(30, 64, 175, 0.2);">
@@ -2909,33 +2974,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Métricas consolidadas em cards
-col_res1, col_res2, col_res3, col_res4 = st.columns(4)
+col_res1, col_res2 = st.columns(2)
 
 with col_res1:
-    st.markdown(f"""
-    <div style="background: linear-gradient(135deg, #dbeafe, #bfdbfe); border-radius: 8px; padding: 15px; margin: 10px 0; box-shadow: 0 2px 8px rgba(59, 130, 246, 0.15); border-left: 4px solid #3b82f6;">
-        <h3 style="color: #1e40af; margin: 0 0 5px 0; font-size: 1em; font-weight: 600;">Alertas Críticos</h3>
-        <p style="color: #64748b; margin: 0 0 8px 0; font-size: 0.85em;">Situações que precisam de atenção imediata</p>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <div style="font-size: 1.5em; font-weight: 700; color: #1e40af;">{alerta_count}</div>
-            <div style="font-size: 1.5em; font-weight: 700; color: #64748b;">{alunos_unicos_alerta} alunos</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-with col_res2:
-    st.markdown(f"""
-    <div style="background: linear-gradient(135deg, #e0f2fe, #b3e5fc); border-radius: 8px; padding: 15px; margin: 10px 0; box-shadow: 0 2px 8px rgba(14, 165, 233, 0.15); border-left: 4px solid #0ea5e9;">
-        <h3 style="color: #0c4a6e; margin: 0 0 5px 0; font-size: 1em; font-weight: 600;">Corda Bamba</h3>
-        <p style="color: #64748b; margin: 0 0 8px 0; font-size: 0.85em;">Precisam de média ≥ 7 nos próximos bimestres</p>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <div style="font-size: 1.5em; font-weight: 700; color: #0c4a6e;">{corda_bamba_count}</div>
-            <div style="font-size: 1.5em; font-weight: 700; color: #64748b;">{alunos_unicos_corda_bamba} alunos</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-with col_res3:
     # Calcular total de alunos com notas baixas
     total_alunos_notas_baixas = max(alunos_notas_baixas_b1, alunos_notas_baixas_b2)
     st.markdown(f"""
@@ -2952,7 +2993,7 @@ with col_res3:
     # Adicionar tooltip usando st.metric
     st.metric("", "", help="Alunos únicos que tiveram pelo menos uma nota abaixo de 6 em qualquer bimestre. Considera o maior número entre 1º e 2º bimestres.")
 
-with col_res4:
+with col_res2:
     # Calcular alunos com frequência baixa se disponível
     if "Frequencia Anual" in df_filt.columns or "Frequencia" in df_filt.columns:
         col_freq_raw = "Frequencia Anual" if "Frequencia Anual" in df_filt.columns else "Frequencia"
@@ -2993,6 +3034,37 @@ with col_res4:
             <div style="font-size: 1.5em; font-weight: 700; color: #64748b;">N/A</div>
         </div>
         """, unsafe_allow_html=True)
+
+# Destaques: 10 melhores alunos por média das notas (respeita filtros e tipo de análise)
+st.markdown("---")
+st.markdown("### ⭐ Destaques: 10 melhores alunos (por média das notas)")
+if tipo_analise == "Apenas 1º Bimestre":
+    _kw_destaques = ["Primeiro"]
+    st.caption(
+        "Ranking pela média aritmética das **notas do 1º bimestre**; considera escola, turmas, disciplinas e demais filtros da barra lateral."
+    )
+else:
+    _kw_destaques = ["Primeiro", "Segundo"]
+    st.caption(
+        "Ranking pela média aritmética das **notas do 1º e do 2º bimestre**; considera os filtros da barra lateral. "
+        "A coluna Escola aparece só quando há mais de uma escola nos dados filtrados."
+    )
+
+_df_destaques = top_destaques_por_media_notas(df_filt, coluna_aluno, _kw_destaques, 10)
+if not _df_destaques.empty:
+    st.dataframe(_df_destaques, use_container_width=True, hide_index=True)
+    col_dst1, col_dst2 = st.columns([1, 4])
+    with col_dst1:
+        if st.button("📊 Exportar destaques", key="export_top10_destaques"):
+            excel_data = criar_excel_formatado(_df_destaques.copy(), "Top10_Destaques")
+            st.download_button(
+                label="Baixar Excel",
+                data=excel_data,
+                file_name="top10_melhores_alunos.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+else:
+    st.info("Sem notas suficientes para montar o ranking de destaques com os filtros atuais.")
 
 # KPIs - Análise de Frequência
 if "Frequencia Anual" in df_filt.columns:
@@ -3840,6 +3912,146 @@ if tipo_analise != "Apenas 1º Bimestre":
             else:
                 st.info("Sem notas abaixo da média no 2º bimestre para os filtros atuais.")
 
+# Gráficos: média das notas por turma (melhor → pior), alinhado aos filtros da unidade
+st.markdown("### 📊 Média das notas por turma (da melhor para a pior)")
+st.caption(
+    "Média aritmética das notas lançadas em cada turma, ordenada da maior para a menor. "
+    "Respeita escola, turmas, disciplinas e demais filtros. Com várias escolas nos dados, o rótulo usa Escola — Turma."
+)
+
+if tipo_analise == "Apenas 1º Bimestre":
+    _tit_geral_turma = "Média das notas por turma – 1º bimestre"
+    _kw_geral = ["Primeiro"]
+else:
+    _tit_geral_turma = "Média das notas por turma – 1º e 2º bimestres"
+    _kw_geral = ["Primeiro", "Segundo"]
+
+with st.expander(f"📈 Geral – {_tit_geral_turma}"):
+    _g_turma = medias_notas_por_turma_ordenadas(df_filt, _kw_geral, ("#1e40af", "#059669"))
+    if len(_g_turma) > 0:
+        _cores_map = {c: c for c in _g_turma["Cor"].unique()}
+        _fig_t = px.bar(
+            _g_turma,
+            x="Turma_Label",
+            y="Media_Notas",
+            title=_tit_geral_turma,
+            color="Cor",
+            color_discrete_map=_cores_map,
+            hover_data={"N_Lancamentos": True, "Media_Notas": ":.2f"},
+        )
+        _fig_t.update_layout(
+            xaxis_title=None,
+            yaxis_title="Média das notas",
+            bargap=0.25,
+            showlegend=False,
+            xaxis_tickangle=45,
+            xaxis={"categoryorder": "array", "categoryarray": _g_turma["Turma_Label"].tolist()},
+            yaxis=dict(range=[0, max(10.5, float(_g_turma["Media_Notas"].max()) + 0.5)]),
+        )
+        _fig_t.update_traces(text=_g_turma["Media_Notas"].round(2), textposition="outside")
+        st.plotly_chart(_fig_t, use_container_width=True)
+        _col_ex_t0, _ = st.columns([1, 4])
+        with _col_ex_t0:
+            if st.button("📊 Exportar ranking (geral)", key="export_graf_turma_geral"):
+                _exp = _g_turma[["Turma_Label", "Media_Notas", "N_Lancamentos"]].copy()
+                _exp["Media_Notas"] = _exp["Media_Notas"].round(3)
+                _exp = _exp.rename(columns={"Turma_Label": "Turma", "N_Lancamentos": "Qtd_Notas"})
+                excel_data = criar_excel_formatado(_exp, "Media_Por_Turma_Geral")
+                st.download_button(
+                    label="Baixar Excel",
+                    data=excel_data,
+                    file_name="media_notas_por_turma_geral.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+    else:
+        st.info("Sem notas para montar o ranking por turma com os filtros atuais.")
+
+if tipo_analise == "Apenas 1º Bimestre":
+    _col_turma1 = st.columns(1)[0]
+else:
+    _col_turma1, _col_turma2 = st.columns(2)
+
+with _col_turma1:
+    with st.expander("📊 1º bimestre – média por turma (melhor → pior)"):
+        _g1 = medias_notas_por_turma_ordenadas(df_filt, ["Primeiro"], ("#dc2626", "#ea580c"))
+        if len(_g1) > 0:
+            _map1 = {c: c for c in _g1["Cor"].unique()}
+            _f1 = px.bar(
+                _g1,
+                x="Turma_Label",
+                y="Media_Notas",
+                title="Média das notas por turma – 1º bimestre",
+                color="Cor",
+                color_discrete_map=_map1,
+                hover_data={"N_Lancamentos": True, "Media_Notas": ":.2f"},
+            )
+            _f1.update_layout(
+                xaxis_title=None,
+                yaxis_title="Média das notas",
+                bargap=0.25,
+                showlegend=False,
+                xaxis_tickangle=45,
+                xaxis={"categoryorder": "array", "categoryarray": _g1["Turma_Label"].tolist()},
+                yaxis=dict(range=[0, max(10.5, float(_g1["Media_Notas"].max()) + 0.5)]),
+            )
+            _f1.update_traces(text=_g1["Media_Notas"].round(2), textposition="outside")
+            st.plotly_chart(_f1, use_container_width=True)
+            _ce1, _ = st.columns([1, 4])
+            with _ce1:
+                if st.button("📊 Exportar 1º bim.", key="export_graf_turma_b1"):
+                    _e1 = _g1[["Turma_Label", "Media_Notas", "N_Lancamentos"]].copy()
+                    _e1["Media_Notas"] = _e1["Media_Notas"].round(3)
+                    _e1 = _e1.rename(columns={"Turma_Label": "Turma", "N_Lancamentos": "Qtd_Notas"})
+                    st.download_button(
+                        label="Baixar Excel",
+                        data=criar_excel_formatado(_e1, "Media_Por_Turma_B1"),
+                        file_name="media_notas_por_turma_1bim.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+        else:
+            st.info("Sem notas do 1º bimestre para o ranking por turma.")
+
+if tipo_analise != "Apenas 1º Bimestre":
+    with _col_turma2:
+        with st.expander("📊 2º bimestre – média por turma (melhor → pior)"):
+            _g2 = medias_notas_por_turma_ordenadas(df_filt, ["Segundo"], ("#7c3aed", "#a855f7"))
+            if len(_g2) > 0:
+                _map2 = {c: c for c in _g2["Cor"].unique()}
+                _f2 = px.bar(
+                    _g2,
+                    x="Turma_Label",
+                    y="Media_Notas",
+                    title="Média das notas por turma – 2º bimestre",
+                    color="Cor",
+                    color_discrete_map=_map2,
+                    hover_data={"N_Lancamentos": True, "Media_Notas": ":.2f"},
+                )
+                _f2.update_layout(
+                    xaxis_title=None,
+                    yaxis_title="Média das notas",
+                    bargap=0.25,
+                    showlegend=False,
+                    xaxis_tickangle=45,
+                    xaxis={"categoryorder": "array", "categoryarray": _g2["Turma_Label"].tolist()},
+                    yaxis=dict(range=[0, max(10.5, float(_g2["Media_Notas"].max()) + 0.5)]),
+                )
+                _f2.update_traces(text=_g2["Media_Notas"].round(2), textposition="outside")
+                st.plotly_chart(_f2, use_container_width=True)
+                _ce2, _ = st.columns([1, 4])
+                with _ce2:
+                    if st.button("📊 Exportar 2º bim.", key="export_graf_turma_b2"):
+                        _e2 = _g2[["Turma_Label", "Media_Notas", "N_Lancamentos"]].copy()
+                        _e2["Media_Notas"] = _e2["Media_Notas"].round(3)
+                        _e2 = _e2.rename(columns={"Turma_Label": "Turma", "N_Lancamentos": "Qtd_Notas"})
+                        st.download_button(
+                            label="Baixar Excel",
+                            data=criar_excel_formatado(_e2, "Media_Por_Turma_B2"),
+                            file_name="media_notas_por_turma_2bim.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        )
+            else:
+                st.info("Sem notas do 2º bimestre para o ranking por turma.")
+
 # Gráfico: Distribuição de Frequência por Faixas
 col_graf1, col_graf2 = st.columns(2)
 
@@ -3976,11 +4188,20 @@ with st.expander("Análise Cruzada: Notas x Frequência"):
         # Merge com indicadores de notas
         cruzada = indic.merge(freq_alunos, on=[coluna_aluno, "Turma"], how="left")
         
-        # Criar matriz de cruzamento
-        matriz_cruzada = cruzada.groupby(["Classificacao", "Classificacao_Freq"]).size().unstack(fill_value=0)
+        # Matriz por alunos únicos (evita inflar o número com uma linha por disciplina)
+        matriz_cruzada = (
+            cruzada.groupby(["Classificacao", "Classificacao_Freq"])[coluna_aluno]
+            .nunique()
+            .unstack(fill_value=0)
+        )
         
         if not matriz_cruzada.empty:
-            st.markdown("**Matriz de Cruzamento: Classificação de Notas x Frequência**")
+            st.markdown("**Matriz de Cruzamento: Classificação de Notas x Frequência (alunos únicos)**")
+            st.caption(
+                "Cada valor é a quantidade de alunos distintos com pelo menos uma disciplina nessa combinação "
+                "de classificação de notas e de frequência. A soma das células pode ser maior que o total de alunos, "
+                "pois o mesmo aluno pode entrar em mais de uma célula (ex.: verde em uma disciplina e vermelho em outra)."
+            )
             st.dataframe(matriz_cruzada, use_container_width=True)
             
             # Análise de alunos com frequência abaixo de 95%
