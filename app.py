@@ -1187,6 +1187,30 @@ def processar_notas_frequencia(df):
         df = df.rename(columns={"Frequência": "Frequencia"})
     if "Frequência Anual" in df.columns and "Frequencia Anual" not in df.columns:
         df = df.rename(columns={"Frequência Anual": "Frequencia Anual"})
+
+    # Planilha "larga" (SGE): colunas "Primeiro Bimestre", "Segundo Bimestre", … (2º–4º vazios)
+    # Usar somente a coluna do 1º bimestre como Nota e fixar Periodo — evita misturar com coluna "Nota"
+    # genérica, totais ou outros períodos exportados na mesma linha.
+    col_nota_b1 = None
+    for c in df.columns:
+        if str(c).strip().lower() == "primeiro bimestre":
+            col_nota_b1 = c
+            break
+    if col_nota_b1 is None:
+        for c in df.columns:
+            if _detectar_num_bimestre_em_nome_coluna(c) == 1:
+                col_nota_b1 = c
+                break
+    if col_nota_b1 is not None:
+        cols_bim_nota = [c for c in df.columns if _detectar_num_bimestre_em_nome_coluna(c) is not None]
+        meta = [c for c in df.columns if c not in cols_bim_nota]
+        for _drop in ("Nota", "Periodo", "Período"):
+            if _drop in meta:
+                meta.remove(_drop)
+        df = df[meta + [col_nota_b1]].copy()
+        df = df.rename(columns={col_nota_b1: "Nota"})
+        df["Periodo"] = "Primeiro Bimestre"
+        df.attrs["planilha_notas_coluna_b1"] = str(col_nota_b1)
     
     # Detectar se é planilha do tipo "AtaMapa" (tem coluna "Estudante" e "Composicao")
     # Para este tipo de planilha, filtrar apenas primeiro e segundo bimestre
@@ -2071,6 +2095,43 @@ def mapear_bimestre(periodo: str) -> int | None:
     if "quarto" in p or "4º" in p or "4o" in p:
         return 4
     return None
+
+
+def _detectar_num_bimestre_em_nome_coluna(nome) -> int | None:
+    """
+    Identifica se o nome da coluna é de NOTA de um bimestre específico (planilha larga).
+    Ignora colunas de frequência/falta. Retorna 1–4 ou None.
+    """
+    if nome is None:
+        return None
+    raw = str(nome).strip()
+    n = raw.lower()
+    n = unicodedata.normalize("NFKD", n)
+    n = "".join(ch for ch in n if not unicodedata.combining(ch))
+    if "frequ" in n or "falta" in n or "ausen" in n:
+        return None
+    if "bimestre" not in n and "bim " not in n and not re.search(r"\b[1-4]\s*º", n):
+        return None
+    if str(raw).strip().lower() == "primeiro bimestre":
+        return 1
+    if "primeiro" in n:
+        return 1
+    if re.search(r"\b1\s*º", n) and ("bim" in n or "nota" in n):
+        return 1
+    if "segundo" in n:
+        return 2
+    if re.search(r"\b2\s*º", n) and ("bim" in n or "nota" in n):
+        return 2
+    if "terceiro" in n:
+        return 3
+    if re.search(r"\b3\s*º", n) and ("bim" in n or "nota" in n):
+        return 3
+    if "quarto" in n:
+        return 4
+    if re.search(r"\b4\s*º", n) and ("bim" in n or "nota" in n):
+        return 4
+    return None
+
 
 def classificar_status_b1_b2(n1, n2, media12):
     """
@@ -3164,10 +3225,17 @@ with st.expander(expander_title):
     if "Frequencia Anual" in df_filt.columns or "Frequencia" in df_filt.columns:
         # Tabela de frequência por aluno e turma (agrupando por aluno e turma para mostrar turmas)
         if "Frequencia Anual" in df_filt.columns:
-            freq_detalhada = df_filt.groupby([coluna_aluno, "Turma"])["Frequencia Anual"].last().reset_index()
-            freq_detalhada = freq_detalhada.rename(columns={"Frequencia Anual": "Frequencia"})
+            freq_detalhada = df_filt.groupby([coluna_aluno, "Turma"], as_index=False).agg(
+                Frequencia=("Frequencia Anual", "last"),
+                **({"Falta": ("Falta", "sum")} if "Falta" in df_filt.columns else {}),
+            )
         else:
-            freq_detalhada = df_filt.groupby([coluna_aluno, "Turma"])["Frequencia"].last().reset_index()
+            freq_detalhada = df_filt.groupby([coluna_aluno, "Turma"], as_index=False).agg(
+                Frequencia=("Frequencia", "last"),
+                **({"Falta": ("Falta", "sum")} if "Falta" in df_filt.columns else {}),
+            )
+        if "Falta" in freq_detalhada.columns:
+            freq_detalhada["Falta"] = pd.to_numeric(freq_detalhada["Falta"], errors="coerce").fillna(0).astype(int)
         freq_detalhada["Classificacao_Freq"] = freq_detalhada["Frequencia"].apply(classificar_frequencia)
         freq_detalhada = freq_detalhada.sort_values(coluna_aluno)
         
@@ -3190,10 +3258,19 @@ with st.expander(expander_title):
         freq_detalhada["Frequencia_Formatada"] = freq_detalhada["Frequencia"].apply(
             lambda x: f"{x:.1f}%" if pd.notna(x) else "N/A"
         )
-        
+
+        cols_freq_view = [coluna_aluno, "Turma"]
+        if "Falta" in freq_detalhada.columns:
+            cols_freq_view.append("Falta")
+        cols_freq_view.extend(["Frequencia_Formatada", "Classificacao_Freq"])
+        st.caption(
+            "A coluna **Falta** soma os valores da planilha para aquele aluno na mesma turma "
+            "(disciplinas e períodos incluídos nos filtros)."
+        )
+
         # Aplicar cores
         styled_freq = _styler_apply_map(
-            freq_detalhada[[coluna_aluno, "Turma", "Frequencia_Formatada", "Classificacao_Freq"]].style,
+            freq_detalhada[cols_freq_view].style,
             color_frequencia,
             subset=["Classificacao_Freq"],
         )
@@ -3204,7 +3281,7 @@ with st.expander(expander_title):
         col_export5, col_export6 = st.columns([1, 4])
         with col_export5:
             if st.button("📊 Exportar Frequência", key="export_frequencia", help="Baixar planilha com análise de frequência"):
-                excel_data = criar_excel_formatado(freq_detalhada[[coluna_aluno, "Turma", "Frequencia_Formatada", "Classificacao_Freq"]], "Analise_Frequencia")
+                excel_data = criar_excel_formatado(freq_detalhada[cols_freq_view], "Analise_Frequencia")
                 st.download_button(
                     label="Baixar Excel",
                     data=excel_data,
@@ -4367,16 +4444,27 @@ with col_export_all1:
             # Aba 3: Análise de Frequência (se disponível)
             if "Frequencia Anual" in df_filt.columns or "Frequencia" in df_filt.columns:
                 if "Frequencia Anual" in df_filt.columns:
-                    freq_detalhada = df_filt.groupby([coluna_aluno, "Turma"])["Frequencia Anual"].last().reset_index()
-                    freq_detalhada = freq_detalhada.rename(columns={"Frequencia Anual": "Frequencia"})
+                    freq_detalhada = df_filt.groupby([coluna_aluno, "Turma"], as_index=False).agg(
+                        Frequencia=("Frequencia Anual", "last"),
+                        **({"Falta": ("Falta", "sum")} if "Falta" in df_filt.columns else {}),
+                    )
                 else:
-                    freq_detalhada = df_filt.groupby([coluna_aluno, "Turma"])["Frequencia"].last().reset_index()
+                    freq_detalhada = df_filt.groupby([coluna_aluno, "Turma"], as_index=False).agg(
+                        Frequencia=("Frequencia", "last"),
+                        **({"Falta": ("Falta", "sum")} if "Falta" in df_filt.columns else {}),
+                    )
+                if "Falta" in freq_detalhada.columns:
+                    freq_detalhada["Falta"] = pd.to_numeric(freq_detalhada["Falta"], errors="coerce").fillna(0).astype(int)
                 
                 freq_detalhada["Classificacao_Freq"] = freq_detalhada["Frequencia"].apply(classificar_frequencia)
                 freq_detalhada["Frequencia_Formatada"] = freq_detalhada["Frequencia"].apply(
                     lambda x: f"{x:.1f}%" if pd.notna(x) else "N/A"
                 )
-                freq_detalhada[[coluna_aluno, "Turma", "Frequencia_Formatada", "Classificacao_Freq"]].to_excel(
+                _cols_x = [coluna_aluno, "Turma"]
+                if "Falta" in freq_detalhada.columns:
+                    _cols_x.append("Falta")
+                _cols_x.extend(["Frequencia_Formatada", "Classificacao_Freq"])
+                freq_detalhada[_cols_x].to_excel(
                     writer, sheet_name="Analise_Frequencia", index=False)
             
             # Aba 4: Notas por Disciplina (se houver dados)
