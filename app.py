@@ -2875,47 +2875,14 @@ if "Frequencia Anual" in df_filt.columns or "Frequencia" in df_filt.columns:
                 </div>
                 """, unsafe_allow_html=True)
 
-    tem_freq_anual = "Frequencia Anual" in df_filt.columns
-    tem_freq_bimestral = "Frequencia" in df_filt.columns
-    tipo_analise_freq = (
-        df_filt.attrs.get("tipo_analise", "Apenas 1º Bimestre")
-        if hasattr(df_filt, "attrs")
-        else "Apenas 1º Bimestre"
-    )
-    rotulo_bimestre = (
-        "1º Bimestre"
-        if tipo_analise_freq == "Apenas 1º Bimestre"
-        else "do período"
-    )
-
     blocos_freq = []
-    if tem_freq_anual:
+    if "Frequencia Anual" in df_filt.columns:
         blocos_freq.append(("Frequência Anual", "Frequencia Anual"))
-    if tem_freq_bimestral:
-        titulo_bim = (
-            f"Frequência do {rotulo_bimestre}"
-            if tem_freq_anual
-            else f"Frequência ({rotulo_bimestre})"
-        )
-        blocos_freq.append((titulo_bim, "Frequencia"))
-
-    for idx_bloco, (titulo_bloco, col_freq_raw) in enumerate(blocos_freq):
-        if len(blocos_freq) > 1:
-            margem_topo = "12px" if idx_bloco == 0 else "20px"
-            st.markdown(f"""
-            <div style="background: linear-gradient(135deg, #e0f2fe, #dbeafe); border-radius: 8px; padding: 10px 16px; margin: {margem_topo} 0 8px 0; border-left: 4px solid #1e40af;">
-                <h4 style="color: #1e40af; margin: 0; font-size: 1.1em; font-weight: 600;">{titulo_bloco}</h4>
-            </div>
-            """, unsafe_allow_html=True)
-        contagem = _contagem_freq_resumo_visao(df_filt, col_freq_raw)
-        _render_cards_resumo_freq(contagem)
-        if col_freq_raw == "Frequencia":
-            n_linhas_b1 = len(filtrar_apenas_bimestre_1(df_filt))
-            st.caption(
-                f"Somente linhas do **1º bimestre** na planilha ({n_linhas_b1:,} registros/disciplinas). "
-                "A % por aluno é a **média** das frequências das disciplinas desse bimestre "
-                "(valores 0 ignorados quando há outras disciplinas com frequência válida)."
-            )
+    elif "Frequencia" in df_filt.columns:
+        blocos_freq.append(("Frequência", "Frequencia"))
+    col_freq_resumo = blocos_freq[0][1]
+    contagem = _contagem_freq_resumo_visao(df_filt, col_freq_resumo)
+    _render_cards_resumo_freq(contagem)
 
 # -----------------------------
 # Indicadores e tabelas de risco
