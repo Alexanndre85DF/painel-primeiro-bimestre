@@ -2806,9 +2806,6 @@ if "Frequencia Anual" in df_filt.columns or "Frequencia" in df_filt.columns:
     </div>
     """, unsafe_allow_html=True)
     
-    colF1, colF2, colF3, colF4, colF5 = st.columns(5)
-    
-    # Função para classificar frequência (reutilizando a existente)
     def classificar_frequencia_geral(freq):
         if pd.isna(freq):
             return "Sem dados"
@@ -2823,102 +2820,83 @@ if "Frequencia Anual" in df_filt.columns or "Frequencia" in df_filt.columns:
         else:
             return "Meta Favorável"
     
-    # Calcular frequências para visão geral (usando dados filtrados)
-    # Agrupar apenas por Aluno para evitar duplicação quando aluno está em múltiplas turmas
-    # Verificar qual coluna de aluno existe
-    # Verificar qual coluna de aluno existe
-    if "Aluno" in df_filt.columns:
-        coluna_aluno = "Aluno"
-    elif "Nome_Estudante" in df_filt.columns:
-        coluna_aluno = "Nome_Estudante"
-    elif "Estudante" in df_filt.columns:
-        coluna_aluno = "Estudante"
-    else:
-        # Tentar encontrar uma coluna que contenha "aluno" ou "estudante"
-        colunas_possiveis = [col for col in df_filt.columns if "aluno" in col.lower() or "estudante" in col.lower()]
-        if colunas_possiveis:
-            coluna_aluno = colunas_possiveis[0]
+    def _contagem_freq_resumo_visao(df_src, col_freq_raw):
+        """Consolida 1 frequência por aluno (pior entre turmas/disciplinas) e retorna contagem por faixa."""
+        agg_turma = "min" if col_freq_raw == "Frequencia" else "last"
+        if "Turma" in df_src.columns:
+            freq_por_turma = (
+                df_src.groupby([coluna_aluno, "Turma"])[col_freq_raw]
+                .agg(agg_turma)
+                .reset_index()
+            )
+            freq_geral = (
+                freq_por_turma.groupby(coluna_aluno)[col_freq_raw]
+                .min()
+                .reset_index()
+            )
         else:
-            st.error("Não foi possível encontrar uma coluna de aluno/estudante. Colunas disponíveis: " + ", ".join(df_filt.columns))
-            st.stop()
-    
-    # Consolidar frequência por aluno.
-    # Motivo: um aluno pode aparecer em múltiplas turmas/linhas; queremos uma regra consistente
-    # para os indicadores. Aqui usamos a PIOR (mínima) frequência do aluno (mais informativo
-    # para risco), baseada no último valor por Turma quando disponível.
-    col_freq_raw = "Frequencia Anual" if "Frequencia Anual" in df_filt.columns else "Frequencia"
-    if "Turma" in df_filt.columns:
-        freq_por_turma = (
-            df_filt.groupby([coluna_aluno, "Turma"])[col_freq_raw]
-            .last()
-            .reset_index()
-        )
-        freq_geral = (
-            freq_por_turma.groupby(coluna_aluno)[col_freq_raw]
-            .min()
-            .reset_index()
-        )
-    else:
-        freq_geral = df_filt.groupby(coluna_aluno)[col_freq_raw].min().reset_index()
+            freq_geral = df_src.groupby(coluna_aluno)[col_freq_raw].min().reset_index()
+        freq_geral = freq_geral.rename(columns={col_freq_raw: "Frequencia"})
+        freq_geral["Classificacao_Freq"] = freq_geral["Frequencia"].apply(classificar_frequencia_geral)
+        return freq_geral["Classificacao_Freq"].value_counts()
 
-    freq_geral = freq_geral.rename(columns={col_freq_raw: "Frequencia"})
-    
-    freq_geral["Classificacao_Freq"] = freq_geral["Frequencia"].apply(classificar_frequencia_geral)
-    contagem_freq_geral = freq_geral["Classificacao_Freq"].value_counts()
-    
-    # Calcular total de alunos para porcentagem
-    total_alunos_freq = contagem_freq_geral.sum()
-    
-    with colF1:
-        valor_reprovado = contagem_freq_geral.get("Reprovado", 0)
-        percent_reprovado = (valor_reprovado / total_alunos_freq * 100) if total_alunos_freq > 0 else 0
-        st.markdown(f"""
-        <div style="background: linear-gradient(135deg, #dbeafe, #bfdbfe); border-radius: 10px; padding: 15px; margin: 5px 0; box-shadow: 0 2px 8px rgba(59, 130, 246, 0.15); border-left: 4px solid #3b82f6;">
-            <div style="font-size: 0.9em; font-weight: 600; color: #1e40af; margin-bottom: 8px;">< 75% (Reprovado)</div>
-            <div style="font-size: 1.8em; font-weight: 700; color: #1e40af; margin: 8px 0;">{valor_reprovado}</div>
-            <div style="font-size: 1.3em; color: #64748b; font-weight: 600;">({percent_reprovado:.1f}%)</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with colF2:
-        valor_alto_risco = contagem_freq_geral.get("Alto Risco", 0)
-        percent_alto_risco = (valor_alto_risco / total_alunos_freq * 100) if total_alunos_freq > 0 else 0
-        st.markdown(f"""
-        <div style="background: linear-gradient(135deg, #e0f2fe, #b3e5fc); border-radius: 10px; padding: 15px; margin: 5px 0; box-shadow: 0 2px 8px rgba(14, 165, 233, 0.15); border-left: 4px solid #0ea5e9;">
-            <div style="font-size: 0.9em; font-weight: 600; color: #0c4a6e; margin-bottom: 8px;">< 80% (Alto Risco)</div>
-            <div style="font-size: 1.8em; font-weight: 700; color: #0c4a6e; margin: 8px 0;">{valor_alto_risco}</div>
-            <div style="font-size: 1.3em; color: #64748b; font-weight: 600;">({percent_alto_risco:.1f}%)</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with colF3:
-        valor_risco_moderado = contagem_freq_geral.get("Risco Moderado", 0)
-        percent_risco_moderado = (valor_risco_moderado / total_alunos_freq * 100) if total_alunos_freq > 0 else 0
-        st.markdown(f"""
-        <div style="background: linear-gradient(135deg, #f0f9ff, #dbeafe); border-radius: 10px; padding: 15px; margin: 5px 0; box-shadow: 0 2px 8px rgba(30, 64, 175, 0.15); border-left: 4px solid #1e40af;">
-            <div style="font-size: 0.9em; font-weight: 600; color: #1e40af; margin-bottom: 8px;">< 90% (Risco Moderado)</div>
-            <div style="font-size: 1.8em; font-weight: 700; color: #1e40af; margin: 8px 0;">{valor_risco_moderado}</div>
-            <div style="font-size: 1.3em; color: #64748b; font-weight: 600;">({percent_risco_moderado:.1f}%)</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with colF4:
-        valor_ponto_atencao = contagem_freq_geral.get("Ponto de Atenção", 0)
-        percent_ponto_atencao = (valor_ponto_atencao / total_alunos_freq * 100) if total_alunos_freq > 0 else 0
-        st.markdown(f"""
-        <div style="background: linear-gradient(135deg, #eff6ff, #dbeafe); border-radius: 10px; padding: 15px; margin: 5px 0; box-shadow: 0 2px 8px rgba(59, 130, 246, 0.15); border-left: 4px solid #3b82f6;">
-            <div style="font-size: 0.9em; font-weight: 600; color: #1e40af; margin-bottom: 8px;">< 95% (Ponto Atenção)</div>
-            <div style="font-size: 1.8em; font-weight: 700; color: #1e40af; margin: 8px 0;">{valor_ponto_atencao}</div>
-            <div style="font-size: 1.3em; color: #64748b; font-weight: 600;">({percent_ponto_atencao:.1f}%)</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with colF5:
-        valor_meta_favoravel = contagem_freq_geral.get("Meta Favorável", 0)
-        percent_meta_favoravel = (valor_meta_favoravel / total_alunos_freq * 100) if total_alunos_freq > 0 else 0
-        st.markdown(f"""
-        <div style="background: linear-gradient(135deg, #dbeafe, #bfdbfe); border-radius: 10px; padding: 15px; margin: 5px 0; box-shadow: 0 2px 8px rgba(59, 130, 246, 0.15); border-left: 4px solid #3b82f6;">
-            <div style="font-size: 0.9em; font-weight: 600; color: #1e40af; margin-bottom: 8px;">≥ 95% (Meta Favorável)</div>
-            <div style="font-size: 1.8em; font-weight: 700; color: #1e40af; margin: 8px 0;">{valor_meta_favoravel}</div>
-            <div style="font-size: 1.3em; color: #64748b; font-weight: 600;">({percent_meta_favoravel:.1f}%)</div>
-        </div>
-        """, unsafe_allow_html=True)
+    def _render_cards_resumo_freq(contagem_freq_geral):
+        total_alunos_freq = contagem_freq_geral.sum()
+        colF1, colF2, colF3, colF4, colF5 = st.columns(5)
+        cards = [
+            (colF1, "< 75% (Reprovado)", "Reprovado", "#dbeafe", "#bfdbfe", "#3b82f6", "#1e40af"),
+            (colF2, "< 80% (Alto Risco)", "Alto Risco", "#e0f2fe", "#b3e5fc", "#0ea5e9", "#0c4a6e"),
+            (colF3, "< 90% (Risco Moderado)", "Risco Moderado", "#f0f9ff", "#dbeafe", "#1e40af", "#1e40af"),
+            (colF4, "< 95% (Ponto Atenção)", "Ponto de Atenção", "#eff6ff", "#dbeafe", "#3b82f6", "#1e40af"),
+            (colF5, "≥ 95% (Meta Favorável)", "Meta Favorável", "#dbeafe", "#bfdbfe", "#3b82f6", "#1e40af"),
+        ]
+        for col_ui, rotulo, chave, c1, c2, borda, texto in cards:
+            valor = contagem_freq_geral.get(chave, 0)
+            percent = (valor / total_alunos_freq * 100) if total_alunos_freq > 0 else 0
+            with col_ui:
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg, {c1}, {c2}); border-radius: 10px; padding: 15px; margin: 5px 0; box-shadow: 0 2px 8px rgba(59, 130, 246, 0.15); border-left: 4px solid {borda};">
+                    <div style="font-size: 0.9em; font-weight: 600; color: {texto}; margin-bottom: 8px;">{rotulo}</div>
+                    <div style="font-size: 1.8em; font-weight: 700; color: {texto}; margin: 8px 0;">{valor}</div>
+                    <div style="font-size: 1.3em; color: #64748b; font-weight: 600;">({percent:.1f}%)</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+    tem_freq_anual = "Frequencia Anual" in df_filt.columns
+    tem_freq_bimestral = "Frequencia" in df_filt.columns
+    tipo_analise_freq = (
+        df_filt.attrs.get("tipo_analise", "Apenas 1º Bimestre")
+        if hasattr(df_filt, "attrs")
+        else "Apenas 1º Bimestre"
+    )
+    rotulo_bimestre = (
+        "1º Bimestre"
+        if tipo_analise_freq == "Apenas 1º Bimestre"
+        else "do período"
+    )
+
+    blocos_freq = []
+    if tem_freq_anual:
+        blocos_freq.append(("Frequência Anual", "Frequencia Anual"))
+    if tem_freq_bimestral:
+        titulo_bim = (
+            f"Frequência do {rotulo_bimestre}"
+            if tem_freq_anual
+            else f"Frequência ({rotulo_bimestre})"
+        )
+        blocos_freq.append((titulo_bim, "Frequencia"))
+
+    for idx_bloco, (titulo_bloco, col_freq_raw) in enumerate(blocos_freq):
+        if len(blocos_freq) > 1:
+            margem_topo = "12px" if idx_bloco == 0 else "20px"
+            st.markdown(f"""
+            <div style="background: linear-gradient(135deg, #e0f2fe, #dbeafe); border-radius: 8px; padding: 10px 16px; margin: {margem_topo} 0 8px 0; border-left: 4px solid #1e40af;">
+                <h4 style="color: #1e40af; margin: 0; font-size: 1.1em; font-weight: 600;">{titulo_bloco}</h4>
+            </div>
+            """, unsafe_allow_html=True)
+        contagem = _contagem_freq_resumo_visao(df_filt, col_freq_raw)
+        _render_cards_resumo_freq(contagem)
+
 
 # -----------------------------
 # Indicadores e tabelas de risco
@@ -3148,6 +3126,20 @@ st.markdown(f"""
 col7, col8, col9, col10, col11 = st.columns(5)
 
 # Função para classificar frequência
+def _consolidar_valor_frequencia_series(s):
+    """
+    Para o mesmo aluno+turma a planilha repete a frequência em várias disciplinas; às vezes com
+    arredondamentos levemente diferentes. Usa o valor mais repetido (moda); se não houver moda, o primeiro válido.
+    """
+    s = pd.to_numeric(s, errors="coerce").dropna()
+    if s.empty:
+        return np.nan
+    mode = s.mode()
+    if len(mode) > 0:
+        return float(mode.iloc[0])
+    return float(s.iloc[0])
+
+
 def classificar_frequencia(freq):
     if pd.isna(freq):
         return "Sem dados"
@@ -3226,12 +3218,12 @@ with st.expander(expander_title):
         # Tabela de frequência por aluno e turma (agrupando por aluno e turma para mostrar turmas)
         if "Frequencia Anual" in df_filt.columns:
             freq_detalhada = df_filt.groupby([coluna_aluno, "Turma"], as_index=False).agg(
-                Frequencia=("Frequencia Anual", "last"),
+                Frequencia=("Frequencia Anual", _consolidar_valor_frequencia_series),
                 **({"Falta": ("Falta", "sum")} if "Falta" in df_filt.columns else {}),
             )
         else:
             freq_detalhada = df_filt.groupby([coluna_aluno, "Turma"], as_index=False).agg(
-                Frequencia=("Frequencia", "last"),
+                Frequencia=("Frequencia", _consolidar_valor_frequencia_series),
                 **({"Falta": ("Falta", "sum")} if "Falta" in df_filt.columns else {}),
             )
         if "Falta" in freq_detalhada.columns:
@@ -3264,8 +3256,12 @@ with st.expander(expander_title):
             cols_freq_view.append("Falta")
         cols_freq_view.extend(["Frequencia_Formatada", "Classificacao_Freq"])
         st.caption(
-            "A coluna **Falta** soma os valores da planilha para aquele aluno na mesma turma "
-            "(disciplinas e períodos incluídos nos filtros)."
+            "**Falta:** soma das faltas registradas na planilha em cada disciplina/período do recorte, "
+            "para aquele aluno na mesma turma. **% (Frequência Anual):** valor que já vem na planilha "
+            "(o painel não recalcula a partir da soma de faltas). Por isso **dois alunos com o mesmo total "
+            "de faltas podem ter percentuais diferentes**: são totais de aulas ou consolidados do sistema "
+            "distintos. A frequência anual repetida em várias linhas do mesmo aluno+turma é unificada pelo "
+            "valor mais frequente (moda) para evitar diferenças só de arredondamento."
         )
 
         # Aplicar cores
@@ -4445,12 +4441,12 @@ with col_export_all1:
             if "Frequencia Anual" in df_filt.columns or "Frequencia" in df_filt.columns:
                 if "Frequencia Anual" in df_filt.columns:
                     freq_detalhada = df_filt.groupby([coluna_aluno, "Turma"], as_index=False).agg(
-                        Frequencia=("Frequencia Anual", "last"),
+                        Frequencia=("Frequencia Anual", _consolidar_valor_frequencia_series),
                         **({"Falta": ("Falta", "sum")} if "Falta" in df_filt.columns else {}),
                     )
                 else:
                     freq_detalhada = df_filt.groupby([coluna_aluno, "Turma"], as_index=False).agg(
-                        Frequencia=("Frequencia", "last"),
+                        Frequencia=("Frequencia", _consolidar_valor_frequencia_series),
                         **({"Falta": ("Falta", "sum")} if "Falta" in df_filt.columns else {}),
                     )
                 if "Falta" in freq_detalhada.columns:
