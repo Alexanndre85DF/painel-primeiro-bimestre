@@ -3916,7 +3916,8 @@ if tipo_analise != "Apenas 1º Bimestre":
 st.markdown("### 📊 Média das notas por turma (da melhor para a pior)")
 st.caption(
     "Média aritmética das notas lançadas em cada turma, ordenada da maior para a menor. "
-    "Respeita escola, turmas, disciplinas e demais filtros. Com várias escolas nos dados, o rótulo usa Escola — Turma."
+    "Respeita escola, turmas, disciplinas e demais filtros. Com várias escolas nos dados, o rótulo usa Escola — Turma. "
+    "Se a análise for apenas do 1º bimestre, mostramos um único gráfico desse período (evita repetir o mesmo dado)."
 )
 
 if tipo_analise == "Apenas 1º Bimestre":
@@ -3926,54 +3927,51 @@ else:
     _tit_geral_turma = "Média das notas por turma – 1º e 2º bimestres"
     _kw_geral = ["Primeiro", "Segundo"]
 
-with st.expander(f"📈 Geral – {_tit_geral_turma}"):
-    _g_turma = medias_notas_por_turma_ordenadas(df_filt, _kw_geral, ("#1e40af", "#059669"))
-    if len(_g_turma) > 0:
-        _cores_map = {c: c for c in _g_turma["Cor"].unique()}
-        _fig_t = px.bar(
-            _g_turma,
-            x="Turma_Label",
-            y="Media_Notas",
-            title=_tit_geral_turma,
-            color="Cor",
-            color_discrete_map=_cores_map,
-            hover_data={"N_Lancamentos": True, "Media_Notas": ":.2f"},
-        )
-        _fig_t.update_layout(
-            xaxis_title=None,
-            yaxis_title="Média das notas",
-            bargap=0.25,
-            showlegend=False,
-            xaxis_tickangle=45,
-            xaxis={"categoryorder": "array", "categoryarray": _g_turma["Turma_Label"].tolist()},
-            yaxis=dict(range=[0, max(10.5, float(_g_turma["Media_Notas"].max()) + 0.5)]),
-        )
-        _fig_t.update_traces(text=_g_turma["Media_Notas"].round(2), textposition="outside")
-        st.plotly_chart(_fig_t, use_container_width=True)
-        _col_ex_t0, _ = st.columns([1, 4])
-        with _col_ex_t0:
-            if st.button("📊 Exportar ranking (geral)", key="export_graf_turma_geral"):
-                _exp = _g_turma[["Turma_Label", "Media_Notas", "N_Lancamentos"]].copy()
-                _exp["Media_Notas"] = _exp["Media_Notas"].round(3)
-                _exp = _exp.rename(columns={"Turma_Label": "Turma", "N_Lancamentos": "Qtd_Notas"})
-                excel_data = criar_excel_formatado(_exp, "Media_Por_Turma_Geral")
-                st.download_button(
-                    label="Baixar Excel",
-                    data=excel_data,
-                    file_name="media_notas_por_turma_geral.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
-    else:
-        st.info("Sem notas para montar o ranking por turma com os filtros atuais.")
+# Com análise só do 1º bimestre, "Geral" e "1º bimestre" seriam o mesmo cálculo — mostramos só o consolidado abaixo.
+if tipo_analise != "Apenas 1º Bimestre":
+    with st.expander(f"📈 Geral – {_tit_geral_turma}"):
+        _g_turma = medias_notas_por_turma_ordenadas(df_filt, _kw_geral, ("#1e40af", "#059669"))
+        if len(_g_turma) > 0:
+            _cores_map = {c: c for c in _g_turma["Cor"].unique()}
+            _fig_t = px.bar(
+                _g_turma,
+                x="Turma_Label",
+                y="Media_Notas",
+                title=_tit_geral_turma,
+                color="Cor",
+                color_discrete_map=_cores_map,
+                hover_data={"N_Lancamentos": True, "Media_Notas": ":.2f"},
+            )
+            _fig_t.update_layout(
+                xaxis_title=None,
+                yaxis_title="Média das notas",
+                bargap=0.25,
+                showlegend=False,
+                xaxis_tickangle=45,
+                xaxis={"categoryorder": "array", "categoryarray": _g_turma["Turma_Label"].tolist()},
+                yaxis=dict(range=[0, max(10.5, float(_g_turma["Media_Notas"].max()) + 0.5)]),
+            )
+            _fig_t.update_traces(text=_g_turma["Media_Notas"].round(2), textposition="outside")
+            st.plotly_chart(_fig_t, use_container_width=True)
+            _col_ex_t0, _ = st.columns([1, 4])
+            with _col_ex_t0:
+                if st.button("📊 Exportar ranking (geral)", key="export_graf_turma_geral"):
+                    _exp = _g_turma[["Turma_Label", "Media_Notas", "N_Lancamentos"]].copy()
+                    _exp["Media_Notas"] = _exp["Media_Notas"].round(3)
+                    _exp = _exp.rename(columns={"Turma_Label": "Turma", "N_Lancamentos": "Qtd_Notas"})
+                    excel_data = criar_excel_formatado(_exp, "Media_Por_Turma_Geral")
+                    st.download_button(
+                        label="Baixar Excel",
+                        data=excel_data,
+                        file_name="media_notas_por_turma_geral.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+        else:
+            st.info("Sem notas para montar o ranking por turma com os filtros atuais.")
 
 if tipo_analise == "Apenas 1º Bimestre":
-    _col_turma1 = st.columns(1)[0]
-else:
-    _col_turma1, _col_turma2 = st.columns(2)
-
-with _col_turma1:
-    with st.expander("📊 1º bimestre – média por turma (melhor → pior)"):
-        _g1 = medias_notas_por_turma_ordenadas(df_filt, ["Primeiro"], ("#dc2626", "#ea580c"))
+    with st.expander("📈 Média das notas por turma – 1º bimestre (melhor → pior)"):
+        _g1 = medias_notas_por_turma_ordenadas(df_filt, ["Primeiro"], ("#1e40af", "#059669"))
         if len(_g1) > 0:
             _map1 = {c: c for c in _g1["Cor"].unique()}
             _f1 = px.bar(
@@ -4010,8 +4008,48 @@ with _col_turma1:
                     )
         else:
             st.info("Sem notas do 1º bimestre para o ranking por turma.")
+else:
+    _col_turma1, _col_turma2 = st.columns(2)
+    with _col_turma1:
+        with st.expander("📊 1º bimestre – média por turma (melhor → pior)"):
+            _g1 = medias_notas_por_turma_ordenadas(df_filt, ["Primeiro"], ("#dc2626", "#ea580c"))
+            if len(_g1) > 0:
+                _map1 = {c: c for c in _g1["Cor"].unique()}
+                _f1 = px.bar(
+                    _g1,
+                    x="Turma_Label",
+                    y="Media_Notas",
+                    title="Média das notas por turma – 1º bimestre",
+                    color="Cor",
+                    color_discrete_map=_map1,
+                    hover_data={"N_Lancamentos": True, "Media_Notas": ":.2f"},
+                )
+                _f1.update_layout(
+                    xaxis_title=None,
+                    yaxis_title="Média das notas",
+                    bargap=0.25,
+                    showlegend=False,
+                    xaxis_tickangle=45,
+                    xaxis={"categoryorder": "array", "categoryarray": _g1["Turma_Label"].tolist()},
+                    yaxis=dict(range=[0, max(10.5, float(_g1["Media_Notas"].max()) + 0.5)]),
+                )
+                _f1.update_traces(text=_g1["Media_Notas"].round(2), textposition="outside")
+                st.plotly_chart(_f1, use_container_width=True)
+                _ce1, _ = st.columns([1, 4])
+                with _ce1:
+                    if st.button("📊 Exportar 1º bim.", key="export_graf_turma_b1"):
+                        _e1 = _g1[["Turma_Label", "Media_Notas", "N_Lancamentos"]].copy()
+                        _e1["Media_Notas"] = _e1["Media_Notas"].round(3)
+                        _e1 = _e1.rename(columns={"Turma_Label": "Turma", "N_Lancamentos": "Qtd_Notas"})
+                        st.download_button(
+                            label="Baixar Excel",
+                            data=criar_excel_formatado(_e1, "Media_Por_Turma_B1"),
+                            file_name="media_notas_por_turma_1bim.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        )
+            else:
+                st.info("Sem notas do 1º bimestre para o ranking por turma.")
 
-if tipo_analise != "Apenas 1º Bimestre":
     with _col_turma2:
         with st.expander("📊 2º bimestre – média por turma (melhor → pior)"):
             _g2 = medias_notas_por_turma_ordenadas(df_filt, ["Segundo"], ("#7c3aed", "#a855f7"))
