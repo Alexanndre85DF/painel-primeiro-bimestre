@@ -1212,22 +1212,11 @@ def processar_notas_frequencia(df):
         df["Periodo"] = "Primeiro Bimestre"
         df.attrs["planilha_notas_coluna_b1"] = str(col_nota_b1)
     
-    # Detectar se é planilha do tipo "AtaMapa" (tem coluna "Estudante" e "Composicao")
-    # Para este tipo de planilha, filtrar apenas primeiro e segundo bimestre
+    # Planilha Ata/Mapa (Estudante + Composição): descarta 2º, 3º e 4º bimestres na importação
     is_atamapa = "Estudante" in df.columns and "Composicao" in df.columns
-    
     if is_atamapa and "Periodo" in df.columns:
-        # Normalizar valores de período para comparação (já feito acima, mas garantir)
         df["Periodo"] = df["Periodo"].astype(str).str.strip()
-        # Filtrar apenas primeiro e segundo bimestre usando a mesma lógica de mapear_bimestre
-        def is_bimestre_1_ou_2(periodo):
-            """Verifica se o período é primeiro ou segundo bimestre"""
-            if not isinstance(periodo, str):
-                return False
-            p = periodo.lower()
-            return ("primeiro" in p or "1º" in p or "1o" in p) or ("segundo" in p or "2º" in p or "2o" in p)
-        
-        df = df[df["Periodo"].apply(is_bimestre_1_ou_2)].copy()
+        df = filtrar_apenas_bimestre_1(df)
 
     # Converter Nota (vírgula -> ponto, texto -> float)
     if "Nota" in df.columns:
@@ -2097,6 +2086,25 @@ def mapear_bimestre(periodo: str) -> int | None:
     return None
 
 
+def filtrar_apenas_bimestre_1(df: pd.DataFrame) -> pd.DataFrame:
+    """Mantém somente linhas do 1º bimestre (coluna Periodo)."""
+    if "Periodo" not in df.columns:
+        return df
+    mask = df["Periodo"].apply(lambda p: mapear_bimestre(p) == 1)
+    return df[mask].copy()
+
+
+def _media_frequencia_disciplinas(series) -> float:
+    """Média da frequência entre disciplinas; ignora 0 (disciplina sem aula/registro)."""
+    s = pd.to_numeric(series, errors="coerce").dropna()
+    if s.empty:
+        return np.nan
+    s_valid = s[s > 0]
+    if len(s_valid) > 0:
+        return float(s_valid.mean())
+    return float(s.mean())
+
+
 def _detectar_num_bimestre_em_nome_coluna(nome) -> int | None:
     """
     Identifica se o nome da coluna é de NOTA de um bimestre específico (planilha larga).
@@ -2535,15 +2543,8 @@ try:
         st.info("📊 Análise focada apenas no primeiro bimestre. Os dados serão filtrados automaticamente.")
         
         # Filtrar apenas primeiro bimestre (sempre)
-        def is_bimestre_1(periodo):
-            """Verifica se o período é primeiro bimestre"""
-            if not isinstance(periodo, str):
-                return False
-            p = periodo.lower()
-            return ("primeiro" in p or "1º" in p or "1o" in p)
-        
         if "Periodo" in df.columns:
-            df = df[df["Periodo"].apply(is_bimestre_1)].copy()
+            df = filtrar_apenas_bimestre_1(df)
         
         # Atualizar subtítulo do header
         st.markdown("""
@@ -2821,11 +2822,16 @@ if "Frequencia Anual" in df_filt.columns or "Frequencia" in df_filt.columns:
             return "Meta Favorável"
     
     def _contagem_freq_resumo_visao(df_src, col_freq_raw):
-        """Consolida 1 frequência por aluno (pior entre turmas/disciplinas) e retorna contagem por faixa."""
-        agg_turma = "min" if col_freq_raw == "Frequencia" else "last"
-        if "Turma" in df_src.columns:
+        """Consolida 1 frequência por aluno e retorna contagem por faixa."""
+        if col_freq_raw == "Frequencia":
+            df_calc = filtrar_apenas_bimestre_1(df_src)
+            agg_turma = _media_frequencia_disciplinas
+        else:
+            df_calc = df_src
+            agg_turma = "last"
+        if "Turma" in df_calc.columns:
             freq_por_turma = (
-                df_src.groupby([coluna_aluno, "Turma"])[col_freq_raw]
+                df_calc.groupby([coluna_aluno, "Turma"])[col_freq_raw]
                 .agg(agg_turma)
                 .reset_index()
             )
@@ -2835,7 +2841,14 @@ if "Frequencia Anual" in df_filt.columns or "Frequencia" in df_filt.columns:
                 .reset_index()
             )
         else:
-            freq_geral = df_src.groupby(coluna_aluno)[col_freq_raw].min().reset_index()
+            if col_freq_raw == "Frequencia":
+                freq_geral = (
+                    df_calc.groupby(coluna_aluno)[col_freq_raw]
+                    .agg(_media_frequencia_disciplinas)
+                    .reset_index()
+                )
+            else:
+                freq_geral = df_calc.groupby(coluna_aluno)[col_freq_raw].min().reset_index()
         freq_geral = freq_geral.rename(columns={col_freq_raw: "Frequencia"})
         freq_geral["Classificacao_Freq"] = freq_geral["Frequencia"].apply(classificar_frequencia_geral)
         return freq_geral["Classificacao_Freq"].value_counts()
@@ -2896,7 +2909,13 @@ if "Frequencia Anual" in df_filt.columns or "Frequencia" in df_filt.columns:
             """, unsafe_allow_html=True)
         contagem = _contagem_freq_resumo_visao(df_filt, col_freq_raw)
         _render_cards_resumo_freq(contagem)
-
+        if col_freq_raw == "Frequencia":
+            n_linhas_b1 = len(filtrar_apenas_bimestre_1(df_filt))
+            st.caption(
+                f"Somente linhas do **1º bimestre** na planilha ({n_linhas_b1:,} registros/disciplinas). "
+                "A % por aluno é a **média** das frequências das disciplinas desse bimestre "
+                "(valores 0 ignorados quando há outras disciplinas com frequência válida)."
+            )
 
 # -----------------------------
 # Indicadores e tabelas de risco
