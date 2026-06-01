@@ -1212,11 +1212,10 @@ def processar_notas_frequencia(df):
         df["Periodo"] = "Primeiro Bimestre"
         df.attrs["planilha_notas_coluna_b1"] = str(col_nota_b1)
     
-    # Planilha Ata/Mapa (Estudante + Composição): descarta 2º, 3º e 4º bimestres na importação
+    # Planilha Ata/Mapa: normaliza Periodo; o recorte ao 1º bimestre (notas) é feito na interface principal
     is_atamapa = "Estudante" in df.columns and "Composicao" in df.columns
     if is_atamapa and "Periodo" in df.columns:
         df["Periodo"] = df["Periodo"].astype(str).str.strip()
-        df = filtrar_apenas_bimestre_1(df)
 
     # Converter Nota (vírgula -> ponto, texto -> float)
     if "Nota" in df.columns:
@@ -2088,10 +2087,62 @@ def mapear_bimestre(periodo: str) -> int | None:
 
 def filtrar_apenas_bimestre_1(df: pd.DataFrame) -> pd.DataFrame:
     """Mantém somente linhas do 1º bimestre (coluna Periodo)."""
+    return filtrar_bimestre_n(df, 1)
+
+
+def filtrar_bimestre_n(df: pd.DataFrame, n: int) -> pd.DataFrame:
+    """Mantém somente linhas do bimestre n (coluna Periodo)."""
     if "Periodo" not in df.columns:
-        return df
-    mask = df["Periodo"].apply(lambda p: mapear_bimestre(p) == 1)
+        return df.iloc[0:0].copy()
+    mask = df["Periodo"].apply(lambda p: mapear_bimestre(p) == n)
     return df[mask].copy()
+
+
+def tem_dados_bimestre(df: pd.DataFrame, n: int) -> bool:
+    if df is None or df.empty or "Periodo" not in df.columns:
+        return False
+    return bool(df["Periodo"].apply(lambda p: mapear_bimestre(p) == n).any())
+
+
+def montar_freq_detalhada_por_aluno(
+    df_src: pd.DataFrame,
+    coluna_aluno: str,
+    modo: str,
+    classificar_fn,
+    consolidar_fn,
+) -> pd.DataFrame:
+    """
+    Tabela por aluno+turma para abas de frequência.
+    modo: 'anual' | 'bimestre_1' | 'bimestre_2'
+    """
+    if df_src is None or df_src.empty:
+        return pd.DataFrame()
+
+    if modo == "anual":
+        if "Frequencia Anual" not in df_src.columns:
+            return pd.DataFrame()
+        agg_map = {"Frequencia": ("Frequencia Anual", consolidar_fn)}
+        grp_cols = [coluna_aluno, "Turma"] if "Turma" in df_src.columns else [coluna_aluno]
+        freq_det = df_src.groupby(grp_cols, as_index=False).agg(**agg_map)
+    else:
+        if "Frequencia" not in df_src.columns:
+            return pd.DataFrame()
+        num_bim = 1 if modo == "bimestre_1" else 2
+        df_calc = filtrar_bimestre_n(df_src, num_bim)
+        if df_calc.empty:
+            return pd.DataFrame()
+        col_faltas = f"Faltas_{num_bim}_Bimestre"
+        agg_map = {"Frequencia": ("Frequencia", _media_frequencia_disciplinas)}
+        if "Falta" in df_calc.columns:
+            agg_map[col_faltas] = ("Falta", "sum")
+        grp_cols = [coluna_aluno, "Turma"] if "Turma" in df_calc.columns else [coluna_aluno]
+        freq_det = df_calc.groupby(grp_cols, as_index=False).agg(**agg_map)
+
+    if "Falta" in freq_det.columns:
+        freq_det["Falta"] = pd.to_numeric(freq_det["Falta"], errors="coerce").fillna(0).astype(int)
+    freq_det["Classificacao_Freq"] = freq_det["Frequencia"].apply(classificar_fn)
+    freq_det = freq_det.sort_values("Frequencia", ascending=True, na_position="last")
+    return freq_det
 
 
 def _media_frequencia_disciplinas(series) -> float:
@@ -2542,7 +2593,13 @@ try:
         tipo_analise = "Apenas 1º Bimestre"
         st.info("📊 Análise focada apenas no primeiro bimestre. Os dados serão filtrados automaticamente.")
         
-        # Filtrar apenas primeiro bimestre (sempre)
+        # Guardar todos os períodos para abas de frequência (anual / 1º / 2º bimestre)
+        if "Periodo" in df.columns:
+            st.session_state["df_freq_todos_periodos"] = df.copy()
+        else:
+            st.session_state["df_freq_todos_periodos"] = None
+
+        # Notas e indicadores: apenas 1º bimestre
         if "Periodo" in df.columns:
             df = filtrar_apenas_bimestre_1(df)
         
@@ -2783,6 +2840,23 @@ else:  # Se nenhuma disciplina selecionada, mostra todas
 if aluno_sel != "Todos":
     df_filt = df_filt[df_filt[coluna_aluno] == aluno_sel]
 
+# Mesmos filtros da barra lateral, com todos os bimestres (frequência detalhada por aba)
+_df_freq_base = st.session_state.get("df_freq_todos_periodos")
+if _df_freq_base is not None:
+    df_filt_freq = _df_freq_base.copy()
+    if escola_sel != "Todas":
+        df_filt_freq = df_filt_freq[df_filt_freq["Escola"] == escola_sel]
+    if status_sel:
+        df_filt_freq = df_filt_freq[df_filt_freq["Status"].isin(status_sel)]
+    if turma_sel:
+        df_filt_freq = df_filt_freq[df_filt_freq["Turma"].isin(turma_sel)]
+    if disc_sel:
+        df_filt_freq = df_filt_freq[df_filt_freq["Disciplina"].isin(disc_sel)]
+    if aluno_sel != "Todos":
+        df_filt_freq = df_filt_freq[df_filt_freq[coluna_aluno] == aluno_sel]
+else:
+    df_filt_freq = df_filt.copy()
+
 # Total de Estudantes Únicos (após filtros)
 st.markdown("""
 <div style="background: linear-gradient(135deg, #1e40af, #3b82f6); border-radius: 12px; padding: 25px; margin: 20px 0; box-shadow: 0 4px 15px rgba(30, 64, 175, 0.2);">
@@ -2877,12 +2951,33 @@ if "Frequencia Anual" in df_filt.columns or "Frequencia" in df_filt.columns:
 
     blocos_freq = []
     if "Frequencia Anual" in df_filt.columns:
-        blocos_freq.append(("Frequência Anual", "Frequencia Anual"))
-    elif "Frequencia" in df_filt.columns:
-        blocos_freq.append(("Frequência", "Frequencia"))
-    col_freq_resumo = blocos_freq[0][1]
-    contagem = _contagem_freq_resumo_visao(df_filt, col_freq_resumo)
-    _render_cards_resumo_freq(contagem)
+        blocos_freq.append((
+            "Frequência anual (consolidada)",
+            "Frequencia Anual",
+            "Coluna <strong>Frequência Anual</strong> da planilha — resultado acumulado do ano letivo.",
+        ))
+    if "Frequencia" in df_filt.columns and df_filt["Frequencia"].notna().any():
+        blocos_freq.append((
+            "1º Bimestre",
+            "Frequencia",
+            "Média da coluna <strong>Frequência</strong> por aluno em todas as disciplinas do Primeiro Bimestre.",
+        ))
+    elif "Frequencia" in df_filt.columns and not blocos_freq:
+        blocos_freq.append((
+            "Frequência",
+            "Frequencia",
+            "Média da coluna <strong>Frequência</strong> por aluno em todas as disciplinas do período.",
+        ))
+
+    for titulo_bloco, col_freq_resumo, descricao_bloco in blocos_freq:
+        st.markdown(f"""
+        <div style="margin: 16px 0 8px 0;">
+            <h4 style="color: #1e40af; margin: 0 0 6px 0; font-size: 1.15em; font-weight: 700;">{titulo_bloco}</h4>
+            <p style="color: #64748b; margin: 0; font-size: 0.9em;">{descricao_bloco}</p>
+        </div>
+        """, unsafe_allow_html=True)
+        contagem = _contagem_freq_resumo_visao(df_filt, col_freq_resumo)
+        _render_cards_resumo_freq(contagem)
 
 # -----------------------------
 # Indicadores e tabelas de risco
@@ -3142,47 +3237,44 @@ def classificar_frequencia(freq):
 
 # Calcular frequências se a coluna existir
 if "Frequencia Anual" in df_filt.columns:
-    # Usar frequência anual se disponível
     freq_atual = df_filt.groupby(coluna_aluno)["Frequencia Anual"].last().reset_index()
     freq_atual = freq_atual.rename(columns={"Frequencia Anual": "Frequencia"})
     freq_atual["Classificacao_Freq"] = freq_atual["Frequencia"].apply(classificar_frequencia)
 elif "Frequencia" in df_filt.columns:
-    # Usar frequência do período se anual não estiver disponível
     freq_atual = df_filt.groupby(coluna_aluno)["Frequencia"].last().reset_index()
     freq_atual["Classificacao_Freq"] = freq_atual["Frequencia"].apply(classificar_frequencia)
-    
-    # Contar por classificação
+
+if "Frequencia Anual" in df_filt.columns or "Frequencia" in df_filt.columns:
     contagem_freq = freq_atual["Classificacao_Freq"].value_counts()
-    
     with col7:
         st.metric(
-            label="< 75% (Reprovado)", 
+            label="< 75% (Reprovado)",
             value=contagem_freq.get("Reprovado", 0),
-            help="Alunos reprovados por frequência (abaixo de 75%)"
+            help="Alunos reprovados por frequência (abaixo de 75%)",
         )
     with col8:
         st.metric(
-            label="< 80% (Alto Risco)", 
+            label="< 80% (Alto Risco)",
             value=contagem_freq.get("Alto Risco", 0),
-            help="Alunos em alto risco de reprovação por frequência"
+            help="Alunos em alto risco de reprovação por frequência",
         )
     with col9:
         st.metric(
-            label="< 90% (Risco Moderado)", 
+            label="< 90% (Risco Moderado)",
             value=contagem_freq.get("Risco Moderado", 0),
-            help="Alunos com risco moderado de reprovação"
+            help="Alunos com risco moderado de reprovação",
         )
     with col10:
         st.metric(
-            label="< 95% (Ponto Atenção)", 
+            label="< 95% (Ponto Atenção)",
             value=contagem_freq.get("Ponto de Atenção", 0),
-            help="Alunos que precisam de atenção na frequência"
+            help="Alunos que precisam de atenção na frequência",
         )
     with col11:
         st.metric(
-            label="≥ 95% (Meta Favorável)", 
+            label="≥ 95% (Meta Favorável)",
             value=contagem_freq.get("Meta Favorável", 0),
-            help="Alunos com frequência dentro da meta"
+            help="Alunos com frequência dentro da meta",
         )
 else:
     col7.metric("< 75% (Reprovado)", "N/A")
@@ -3191,88 +3283,108 @@ else:
     col10.metric("< 95% (Ponto Atenção)", "N/A")
     col11.metric("≥ 95% (Meta Favorável)", "N/A")
 
-# Seção expandível: Análise Detalhada de Frequência
-if "Frequencia Anual" in df_filt.columns:
-    expander_title = "Análise Detalhada de Frequência (Anual)"
-elif "Frequencia" in df_filt.columns:
-    expander_title = "Análise Detalhada de Frequência (Por Período)"
-else:
-    expander_title = "Análise Detalhada de Frequência"
+# Seção expandível: Análise Detalhada de Frequência (abas Anual / 1º / 2º bimestre)
+with st.expander("Análise Detalhada de Frequência"):
+    if "Frequencia Anual" in df_filt_freq.columns or "Frequencia" in df_filt_freq.columns:
 
-with st.expander(expander_title):
-    if "Frequencia Anual" in df_filt.columns or "Frequencia" in df_filt.columns:
-        # Tabela de frequência por aluno e turma (agrupando por aluno e turma para mostrar turmas)
-        if "Frequencia Anual" in df_filt.columns:
-            freq_detalhada = df_filt.groupby([coluna_aluno, "Turma"], as_index=False).agg(
-                Frequencia=("Frequencia Anual", _consolidar_valor_frequencia_series),
-                **({"Falta": ("Falta", "sum")} if "Falta" in df_filt.columns else {}),
-            )
-        else:
-            freq_detalhada = df_filt.groupby([coluna_aluno, "Turma"], as_index=False).agg(
-                Frequencia=("Frequencia", _consolidar_valor_frequencia_series),
-                **({"Falta": ("Falta", "sum")} if "Falta" in df_filt.columns else {}),
-            )
-        if "Falta" in freq_detalhada.columns:
-            freq_detalhada["Falta"] = pd.to_numeric(freq_detalhada["Falta"], errors="coerce").fillna(0).astype(int)
-        freq_detalhada["Classificacao_Freq"] = freq_detalhada["Frequencia"].apply(classificar_frequencia)
-        freq_detalhada = freq_detalhada.sort_values(coluna_aluno)
-        
-        # Função para colorir frequência
         def color_frequencia(val):
             if val == "Reprovado":
-                return "background-color: #f8d7da; color: #721c24"  # Vermelho
+                return "background-color: #f8d7da; color: #721c24"
             elif val == "Alto Risco":
-                return "background-color: #f5c6cb; color: #721c24"  # Vermelho claro
+                return "background-color: #f5c6cb; color: #721c24"
             elif val == "Risco Moderado":
-                return "background-color: #fff3cd; color: #856404"  # Amarelo
+                return "background-color: #fff3cd; color: #856404"
             elif val == "Ponto de Atenção":
-                return "background-color: #ffeaa7; color: #856404"  # Amarelo claro
+                return "background-color: #ffeaa7; color: #856404"
             elif val == "Meta Favorável":
-                return "background-color: #d4edda; color: #155724"  # Verde
-            else:
-                return "background-color: #e2e3e5; color: #383d41"  # Cinza
-        
-        # Formatar frequência
-        freq_detalhada["Frequencia_Formatada"] = freq_detalhada["Frequencia"].apply(
-            lambda x: f"{x:.1f}%" if pd.notna(x) else "N/A"
-        )
+                return "background-color: #d4edda; color: #155724"
+            return "background-color: #e2e3e5; color: #383d41"
 
-        cols_freq_view = [coluna_aluno, "Turma"]
-        if "Falta" in freq_detalhada.columns:
-            cols_freq_view.append("Falta")
-        cols_freq_view.extend(["Frequencia_Formatada", "Classificacao_Freq"])
-        st.caption(
-            "**Falta:** soma das faltas registradas na planilha em cada disciplina/período do recorte, "
-            "para aquele aluno na mesma turma. **% (Frequência Anual):** valor que já vem na planilha "
-            "(o painel não recalcula a partir da soma de faltas). Por isso **dois alunos com o mesmo total "
-            "de faltas podem ter percentuais diferentes**: são totais de aulas ou consolidados do sistema "
-            "distintos. A frequência anual repetida em várias linhas do mesmo aluno+turma é unificada pelo "
-            "valor mais frequente (moda) para evitar diferenças só de arredondamento."
-        )
+        abas_freq_cfg = []
+        if "Frequencia Anual" in df_filt_freq.columns:
+            abas_freq_cfg.append((
+                "Anual",
+                "anual",
+                "Frequência — Anual",
+                "Coluna <strong>Frequência Anual</strong> da planilha. Ordenado da menor para a maior %.",
+            ))
+        if "Frequencia" in df_filt_freq.columns:
+            abas_freq_cfg.append((
+                "1º Bimestre",
+                "bimestre_1",
+                "Frequência — 1º Bimestre",
+                "Média da coluna <strong>Frequência</strong> por aluno em todas as disciplinas do 1º Bimestre. "
+                "Ordenado da menor para a maior %.",
+            ))
+        if tem_dados_bimestre(df_filt_freq, 2) and "Frequencia" in df_filt_freq.columns:
+            abas_freq_cfg.append((
+                "2º Bimestre",
+                "bimestre_2",
+                "Frequência — 2º Bimestre",
+                "Média da coluna <strong>Frequência</strong> por aluno em todas as disciplinas do 2º Bimestre. "
+                "Ordenado da menor para a maior %.",
+            ))
 
-        # Aplicar cores
-        styled_freq = _styler_apply_map(
-            freq_detalhada[cols_freq_view].style,
-            color_frequencia,
-            subset=["Classificacao_Freq"],
-        )
-        
-        st.dataframe(styled_freq, use_container_width=True)
-        
-        # Botão de exportação para frequência
-        col_export5, col_export6 = st.columns([1, 4])
-        with col_export5:
-            if st.button("📊 Exportar Frequência", key="export_frequencia", help="Baixar planilha com análise de frequência"):
-                excel_data = criar_excel_formatado(freq_detalhada[cols_freq_view], "Analise_Frequencia")
-                st.download_button(
-                    label="Baixar Excel",
-                    data=excel_data,
-                    file_name="analise_frequencia.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        tabs_freq = st.tabs([cfg[0] for cfg in abas_freq_cfg])
+
+        for tab_ui, (rotulo, modo, titulo_aba, descricao_aba) in zip(tabs_freq, abas_freq_cfg):
+            with tab_ui:
+                freq_detalhada = montar_freq_detalhada_por_aluno(
+                    df_filt_freq,
+                    coluna_aluno,
+                    modo,
+                    classificar_frequencia,
+                    _consolidar_valor_frequencia_series,
                 )
-        
-        # Legenda de frequência
-        st.markdown("###  Legenda de Frequência")
+                if freq_detalhada.empty:
+                    st.info(f"Sem dados de frequência para **{rotulo}** com os filtros atuais.")
+                    continue
+
+                st.markdown(f"#### {titulo_aba}")
+                st.markdown(
+                    f'<p style="color:#64748b;font-size:0.9em;margin:0 0 12px 0;">{descricao_aba}</p>',
+                    unsafe_allow_html=True,
+                )
+
+                freq_detalhada["Frequencia_Formatada"] = freq_detalhada["Frequencia"].apply(
+                    lambda x: f"{x:.1f}%" if pd.notna(x) else "N/A"
+                )
+
+                cols_freq_view = [coluna_aluno]
+                if "Turma" in freq_detalhada.columns:
+                    cols_freq_view.append("Turma")
+                for col_extra in ("Falta", "Faltas_1_Bimestre", "Faltas_2_Bimestre"):
+                    if col_extra in freq_detalhada.columns:
+                        cols_freq_view.append(col_extra)
+                cols_freq_view.extend(["Frequencia_Formatada", "Classificacao_Freq"])
+
+                styled_freq = _styler_apply_map(
+                    freq_detalhada[cols_freq_view].style,
+                    color_frequencia,
+                    subset=["Classificacao_Freq"],
+                )
+                st.dataframe(styled_freq, use_container_width=True)
+
+                col_export5, _ = st.columns([1, 4])
+                with col_export5:
+                    slug = rotulo.lower().replace("º", "o").replace(" ", "_")
+                    if st.button(
+                        f"📊 Exportar {rotulo}",
+                        key=f"export_frequencia_{slug}",
+                        help=f"Baixar planilha — frequência {rotulo}",
+                    ):
+                        excel_data = criar_excel_formatado(
+                            freq_detalhada[cols_freq_view], f"Freq_{slug}"
+                        )
+                        st.download_button(
+                            label="Baixar Excel",
+                            data=excel_data,
+                            file_name=f"analise_frequencia_{slug}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key=f"dl_freq_{slug}",
+                        )
+
+        st.markdown("### Legenda de Frequência")
         col_leg1, col_leg2, col_leg3 = st.columns(3)
         with col_leg1:
             st.markdown("""
